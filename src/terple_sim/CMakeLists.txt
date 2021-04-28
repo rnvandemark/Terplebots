@@ -10,3 +10,8 @@ catkin_package(CATKIN_DEPENDS
   gazebo_ros
   turtlebot3_description
 )
+
+install(
+  DIRECTORY launch world
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)

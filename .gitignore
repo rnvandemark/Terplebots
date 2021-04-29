@@ -1,0 +1,11 @@
+# Ignore top-level cmake
+src/CMakeLists.txt
+
+# Ignore build products
+build/
+devel/
+install/
+
+# Ignore PyCharm products
+.idea/
+venv/

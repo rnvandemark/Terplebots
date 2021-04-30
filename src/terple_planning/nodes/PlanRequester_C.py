@@ -10,6 +10,7 @@ from math import pi as PI
 
 ROS_NODE_NAME = "centralized_plan_requester"
 
+
 # Get a ROS parameter from the server if it exists
 def get_rosparam(name):
     value = None
@@ -17,12 +18,14 @@ def get_rosparam(name):
         value = rospy.get_param(name)
     return value
 
+
 # Populate a twist message given motion of the wheels
 def get_twist_from(Ul, Ur, r, L):
     twist = Twist()
-    twist.linear.x  = (r/2) * (Ul+Ur)
-    twist.angular.z = (r/L) * (Ur-Ul)
+    twist.linear.x = (r / 2) * (Ul + Ur)
+    twist.angular.z = (r / L) * (Ur - Ul)
     return twist
+
 
 # Publish a series of twist messages given a path to follow
 def handle_path(msg, wheel_radius, lateral_separation, gazebo_model_cli, twist_pub):
@@ -34,16 +37,16 @@ def handle_path(msg, wheel_radius, lateral_separation, gazebo_model_cli, twist_p
         model_name="turtlebot3_burger",
         pose=Pose(
             position=Point(
-                x=(msg.request.init_position.x)-5, # Recenter, as the origin is at (5,5)
-                y=(msg.request.init_position.y)-5, # Recenter, as the origin is at (5,5)
+                x=(msg.request.init_position.x) - 5,  # Recenter, as the origin is at (5,5)
+                y=(msg.request.init_position.y) - 5,  # Recenter, as the origin is at (5,5)
                 z=0
             ),
-            orientation=Quaternion(x=0,y=0,z=0,w=1) # Identity quaternion
+            orientation=Quaternion(x=0, y=0, z=0, w=1)  # Identity quaternion
         ),
         twist=Twist(),
-        reference_frame="world" # "world" or "map" is recognized as the 'world' frame
+        reference_frame="world"  # "world" or "map" is recognized as the 'world' frame
     ))
-    assert(srv_response.success)
+    assert (srv_response.success)
     rospy.sleep(1)
 
     # Iterate through the generated move commands (reverse the backtrack path to move forward)
@@ -55,14 +58,15 @@ def handle_path(msg, wheel_radius, lateral_separation, gazebo_model_cli, twist_p
             wheel_radius,
             lateral_separation
         ))
-        rospy.sleep(cmd.time_elapsed) # Wait for the amount of time that the bot should move
-    twist_pub.publish(Twist()) # Publish 0 twist to stop the bot
+        rospy.sleep(cmd.time_elapsed)  # Wait for the amount of time that the bot should move
+    twist_pub.publish(Twist())  # Publish 0 twist to stop t=he bot
     rospy.signal_shutdown("Received path, ready for clean shutdown.")
+
 
 def main():
     # Capture required user input
     my_sargv = rospy.myargv(argv=sargv)
-    assert(len(my_sargv) == 7)
+    assert (len(my_sargv) == 7)
 
     ii = None; ij = None; fi = None; fj = None; w1 = None; w2 = None
     try:
@@ -87,7 +91,7 @@ def main():
     rospy.init_node(ROS_NODE_NAME)
     robot_r = get_rosparam("/nhr/robot_description/r")
     robot_L = get_rosparam("/nhr/robot_description/L")
-    assert((robot_r != None) and (robot_L != None))
+    assert ((robot_r != None) and (robot_L != None))
 
     rospy.wait_for_service("/gazebo/set_model_state")
     model_state_cli = rospy.ServiceProxy(
@@ -122,6 +126,7 @@ def main():
     ))
     print "Plan request published."
     rospy.spin()
+
 
 if __name__ == "__main__":
     main()

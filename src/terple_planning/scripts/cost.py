@@ -5,14 +5,9 @@ import rospy
 from cv2 import line
 
 
-def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, scl=None):
+def curve(xn, yn, theta_deg, ul, ur, r, L, GRID_D, GRID_H, dt=0.1, tf=1, img=None, scl=None):
     # img is an option arg. if present then func will also draw the curve on the img
     # Must also pass scl with image. represents how much bigger the output viz video is than the grid
-
-    r = rospy.get_param("/terple/robot_description/r")
-    L = rospy.get_param("/terple/robot_description/L")
-    GRID_D = rospy.get_param("/terple/space_description/GRID_D")
-    GRID_H = rospy.get_param("/terple/space_description/GRID_H")
 
     # reformat to be in gazebo grid system for calculations
     xn /= float(GRID_D)
@@ -44,6 +39,7 @@ def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, scl=None):
 
     # convert back to working dimensions
     theta_deg = 180 * theta_rad / PI
+    theta_deg = theta_deg % 360
     xn *= GRID_D
     yn *= GRID_D
     dist_traveled *= GRID_D
@@ -51,4 +47,4 @@ def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, scl=None):
     # return img only if one is given
     if img:
         return xn, yn, theta_deg, dist_traveled, img
-    return xn, yn, theta_deg, dist_traveled
+    return xn, yn, theta_deg, dist_traveled, tf

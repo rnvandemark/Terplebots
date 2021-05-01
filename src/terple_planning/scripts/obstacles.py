@@ -2,17 +2,13 @@
 
 import numpy as np
 from math import sqrt
-import rospy
 
-# get ros params that define board space
-ROBOT_RADIUS = rospy.get_param("/terple/robot_description/ROBOT_RADIUS")
-BOARD_H = rospy.get_param("/terple/space_description/BOARD_H")
-BOARD_W = rospy.get_param("/terple/space_description/BOARD_W")
-GRID_D = rospy.get_param("/terple/space_description/GRID_D")
-GRID_H = BOARD_H * GRID_D
-GRID_W = BOARD_W * GRID_D
-GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
 
+# ROBOT_RADIUS = rospy.get_param("/terple/robot_description/ROBOT_RADIUS")
+# CLEARANCE = rospy.get_param("/terple/space_description/CLEARANCE")
+# BOARD_H = rospy.get_param("/terple/space_description/BOARD_H")
+# BOARD_W = rospy.get_param("/terple/space_description/BOARD_W")
+# GRID_D = rospy.get_param("/terple/space_description/GRID_D")
 
 # Board Obstacles
 quads = [[]]
@@ -64,7 +60,12 @@ def elip_check(x0, y0, elip):
     return (x0 - xc) ** 2 / float(a2) + (y0 - yc) ** 2 / float(b2) > 1  # if True, point is in obstacle space
 
 
-def setup_graph(clearance, point_robot=True):
+def setup_graph(ROBOT_RADIUS, CLEARANCE, BOARD_H, BOARD_W, GRID_D, point_robot=True):
+    GRID_H = BOARD_H * GRID_D
+    GRID_W = BOARD_W * GRID_D
+    GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
+    GRID_CLEARANCE = CLEARANCE * GRID_D
+
     obst = np.ones((GRID_H, GRID_W))
 
     # if no obstacles, then don't waste time looking for any
@@ -87,7 +88,7 @@ def setup_graph(clearance, point_robot=True):
         return obst
 
     newObst = np.ones((GRID_H, GRID_W))  # create new obstacle array that will have r
-    r = int(round(GRID_ROBOT_RADIUS + clearance))  # point robot radius
+    r = int(round(GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
     for x in range(GRID_W):
         for y in range(GRID_H):
             for i in range(x - r, x + r):  # window each pixel and check for an obstacle in radius

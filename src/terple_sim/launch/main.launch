@@ -23,6 +23,7 @@
     /terple/robot_description/r: 0.038
     /terple/robot_description/L: 0.354
     /terple/robot_description/ROBOT_RADIUS: 0.153
+    /terple/space_description/CLEARANCE: 10
     /terple/space_description/BOARD_H: 10
     /terple/space_description/BOARD_W: 10
     /terple/space_description/BOARD_O: 30

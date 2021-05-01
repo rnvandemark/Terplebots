@@ -4,14 +4,16 @@ project(terple_msgs)
 find_package(catkin REQUIRED COMPONENTS message_generation geometry_msgs)
 
 add_message_files(FILES
+  AllPaths.msg
   BacktrackNode.msg
+  DecentralizedRobotReadings.msg
   MoveCommand.msg
   NeighborsPose2D.msg
   Path.msg
   PlanRequest.msg
-  AllPaths.msg
+  RobotExternalCharacteristics.msg
+  Vector2.msg
 )
-
 generate_messages(DEPENDENCIES geometry_msgs)
 
 catkin_package(CATKIN_DEPENDS message_runtime)

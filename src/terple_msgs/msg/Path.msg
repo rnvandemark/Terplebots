@@ -6,7 +6,7 @@ nhr_msgs/PlanRequest request
 
 # The order in which positions/nodes were explored, will be valid whether success
 # is true or false, but will not reach the end if false
-nhr_msgs/NeighborsPose2D[] explored
+# nhr_msgs/NeighborsPose2D[] explored
 
 # The path solution, from the final position to the initial position
 # WARNING: the first node in this list (the last node in the list closest to the

@@ -99,7 +99,7 @@ def main():
         SetModelState
     )
     path_pub = rospy.Publisher(
-        "/nhr/plan_request",
+        "/terple/plan_request",
         PlanRequest,
         queue_size=1
     )
@@ -109,7 +109,7 @@ def main():
         queue_size=1
     )
     path_sub = rospy.Subscriber(
-        "/nhr/path",
+        "/terple/path",
         Path,
         lambda m: handle_path(m, robot_r, robot_L, model_state_cli, cmd_vel_pub),
         queue_size=1

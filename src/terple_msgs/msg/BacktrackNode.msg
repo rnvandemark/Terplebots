@@ -5,4 +5,7 @@ geometry_msgs/Pose2D position
 bool has_move_cmd
 
 # The move command used to (ideally) get to this position
-nhr_msgs/MoveCommand move_cmd
+terple_msgs/MoveCommand move_cmd
+
+# The time the node exists at
+uint16 time

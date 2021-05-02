@@ -6,14 +6,14 @@
   <arg name="tb_model_spawn_delay_s" default="0.5" />
   <arg name="centralized" default="1" />
 
-  <include file="$(find gazebo_ros)/launch/empty_world.launch">
-    <arg name="world_name" value="$(find terple_sim)/world/map.world" />
-    <arg name="paused" value="false" />
-    <arg name="use_sim_time" value="true" />
-    <arg name="gui" value="true" />
-    <arg name="headless" value="false" />
-    <arg name="debug" value="false" />
-  </include>
+<!--  <include file="$(find gazebo_ros)/launch/empty_world.launch">-->
+<!--    <arg name="world_name" value="$(find terple_sim)/world/map.world" />-->
+<!--    <arg name="paused" value="false" />-->
+<!--    <arg name="use_sim_time" value="true" />-->
+<!--    <arg name="gui" value="true" />-->
+<!--    <arg name="headless" value="false" />-->
+<!--    <arg name="debug" value="false" />-->
+<!--  </include>-->
 
   <param
     name="robot_description"
@@ -27,7 +27,9 @@
     /terple/space_description/BOARD_H: 10
     /terple/space_description/BOARD_W: 10
     /terple/space_description/BOARD_O: 30
-    /terple/space_description/GRID_D: 25
+    /terple/space_description/GRID_D: 10
+    /terple/movement_description/WHEEL_SPEED_MAJOR: 10
+    /terple/movement_description/WHEEL_SPEED_MINOR: 6
   </rosparam>
 
 <!--  <node-->
@@ -37,12 +39,18 @@
 <!--    args="-urdf -model turtlebot3_$(arg tb_model) -x $(arg tb_pos_x) -y $(arg tb_pos_y) -z $(arg tb_pos_z) -param robot_description"-->
 <!--    output="screen"-->
 <!--    launch-prefix="bash -c 'sleep $(arg tb_model_spawn_delay_s); $0 $@'" />-->
+
   <node
-    name="centralized_planner"
-    pkg="terple_planning"
-    type="Planner_C.py"
-    args="$(arg clearance)"
+    name="centralized_manager"
+    pkg="terple_management"
+    type="Manager_C.py"
     output="screen"
     if="$(arg centralized)"/>
+<!--  <node-->
+<!--    name="centralized_planner"-->
+<!--    pkg="terple_planning"-->
+<!--    type="Planner_C.py"-->
+<!--    output="screen"-->
+<!--    if="$(arg centralized)"/>-->
 
 </launch>

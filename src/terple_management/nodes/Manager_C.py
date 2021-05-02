@@ -1,40 +1,19 @@
 #!/usr/bin/env python
 
+import numpy as np
+from cv2 import circle, line
 import rospy
-from geometry_msgs.msg import Pose2D
+from math import sqrt, atan, cos, sin, pi as PI
+from random import sample, shuffle
 from terple_msgs.msg import PlanRequest, NeighborsPose2D, BacktrackNode, MoveCommand, Path
-from sys import stdout, argv as sargv
-from gc import collect as gc_collect
-from math import sqrt, cos, sin, pi as PI
-from cv2 import line
-
-ROS_NODE_NAME = "centralized_planner"
-
-BOARD_H = 10
-BOARD_W = 10
-BOARD_O = 30
-ROBOT_RADIUS = 0.153
-
-GRID_D = 10
-GRID_H = BOARD_H * GRID_D
-GRID_W = BOARD_W * GRID_D
-GRID_O = int(360 / BOARD_O)
-GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
+# from geometry_msgs.msg import Pose2D, Twist, Pose, Point, Quaternion
+from geometry_msgs.msg import Pose2D
 
 
-def get_rosparam(name):
-    value = None
-    if rospy.has_param(name):
-        value = rospy.get_param(name)
-    return value
+ROS_NODE_NAME = "centralized_manager"
 
 
-def printr(text):
-    stdout.write("\r" + text)
-    stdout.flush()
-
-
-def curve(xn, yn, theta_deg, ul, ur, r, L, GRID_D, GRID_H, dt=0.1, tf=1, img=None, scl=None):
+def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, scl=None):
     # img is an option arg. if present then func will also draw the curve on the img
     # Must also pass scl with image. represents how much bigger the output viz video is than the grid
 
@@ -183,36 +162,23 @@ class DoublyLinkNode(object):
         return dln
 
 
-# A collection of a couple of physical characteristics of the robot
-class RobotDescription(object):
-    # The wheel speed multipliers
-    wheel_speeds = None
-
-    # The wheel radius
-    r = None
-
-    # The lateral distance between the wheels
-    L = None
-
-    # Collect data about the robot
-    def __init__(self, r, L):
-        self.wheel_speeds = (0, 0, 0)
-        self.r = robot_r
-        self.L = robot_L
-
-
 # A pathfinding object which builds a representation of the underlying maze
 class Maze(object):
     # The DiscreteGraph representation of the maze
     obst = None
 
-    # The wheel speed multiplier
-    robo_desc = None
+    # The wheel speeds
+    wheel_speeds = None
 
     # Build the graph with the list of semi-algebraic models
     def __init__(self, r, L, obstacles):
         self.obst = obstacles  # creates the obstacle space. 0 for obstacle, 1 for open space [y, x, t]
-        self.robo_desc = RobotDescription(r, L)
+        self.wheel_speeds = (
+            int(WHEEL_SPEED_MINOR * 0.75),
+            WHEEL_SPEED_MINOR,
+            WHEEL_SPEED_MAJOR,
+            0
+        )
 
     # Determine if a coordinate pair is in a traversable portion of the maze
     def is_in_board(self, j, i):
@@ -228,13 +194,7 @@ class Maze(object):
         return self.dist(n, goal)
 
     # Run A* between a start and goal point, using a forward step length
-    def astar(self, start, goal, minor_wheel_speed, major_wheel_speed):
-        self.robo_desc.wheel_speeds = (
-            int(minor_wheel_speed * 0.75),
-            minor_wheel_speed,
-            major_wheel_speed,
-            0
-        )
+    def astar(self, start, goal):
 
         all_maze_vertex_nodes_map = {}
         for j in range(GRID_H):
@@ -377,25 +337,17 @@ class Maze(object):
         return final_node, nodes_visited
 
 
-def handle_plan_request(msg, maze, pub):
-    print "Plan Request Received..."
+def init_plan(ii, ij, fi, fj, angle_to_center, obst):
+    # path_msg = Path()
+    # path_msg.success = False
+    # path_msg.request = msg
 
-    path_msg = Path()
-    path_msg.success = False
-    path_msg.request = msg
+    s = int(ij * GRID_D), int(ii * GRID_D), angle_to_center
+    g = int(fj * GRID_D), int(fi * GRID_D), 0
 
-    s = int(msg.init_position.y * GRID_D), int(msg.init_position.x * GRID_D), 0
-    g = int(msg.final_position.y * GRID_D), int(msg.final_position.x * GRID_D), 0
+    maze = Maze(robot_r, robot_L, obst)
 
-    obstacles_received = msg.obst
-    obstacles = np.array(obst_received).astype('uint8')
-
-    print "Starting maze generation..."
-    maze = Maze(robot_r, robot_L, obstacles)
-
-    print "Finished, Running A* with {0} => {1}...".format(s, g)
-    final_node, nodes_visited = maze.astar(s, g, msg.wheel_speed_minor, msg.wheel_speed_major)
-    print "Finished, visited {0}".format(len(nodes_visited))
+    final_node, nodes_visited = maze.astar(s, g)
 
     backtrack_path = []
     n = final_node
@@ -414,45 +366,93 @@ def handle_plan_request(msg, maze, pub):
         ))
         n = n.parent
 
-    path_msg.success = (final_node is not None)
-    path_msg.explored = nodes_visited
-    path_msg.backtrack_path = backtrack_path
-
-    pub.publish(path_msg)
-
-
-def cleanly_handle_plan_request(msg, maze, pub):
-    handle_plan_request(msg, maze, pub)
-    gc_collect()
+    # path_msg.success = (final_node is not None)
+    # path_msg.explored = nodes_visited
+    # path_msg.backtrack_path = backtrack_path
+    #
+    # pub.publish(path_msg)
 
 
 def main():
-    print "Waiting for path planning requests..."
+    # set spawn parameters
+    num_of_bots = 8  # could later be changed to be user input
+    bot_spawn_radius = 4
 
-    # Init ROS pub and sub
-    path_pub = rospy.Publisher("/terple/path", Path, queue_size=1)
+    # get starting locations
+    starting_locs = []  # [y, x] locations of bot spawns
+    rad_btwn_bots = 2*PI/num_of_bots
+    for i in range(num_of_bots):  # arrange points in a circle
+        starting_locs.append([
+            BOARD_H/2 + sin(rad_btwn_bots * i) * bot_spawn_radius,
+            BOARD_W/2 + cos(rad_btwn_bots * i) * bot_spawn_radius
+        ])
 
-    plan_request_sub = rospy.Subscriber(
-        "/terple/plan_request",
-        PlanRequest,
-        lambda m: cleanly_handle_plan_request(m, maze, path_pub),
-        queue_size=1
-    )
+    # rearrange list elements to get goal locations around the circle
+    goal_locs = sample(starting_locs, k=num_of_bots)
 
-    rospy.spin()
+    # initialize the grid
+    # obst_init = obstacles.setup_graph(ROBOT_RADIUS, CLEARANCE, BOARD_H, BOARD_W, GRID_D, starts=starting_locs)
+    obst_init = np.ones((GRID_H, GRID_W)).astype('uint8')
+
+    # prepare grid for time dimension
+    obst = np.ones((GRID_H, GRID_W, 0)).astype('uint8')
+
+    # draw the initial robot circles on grid t=0
+    obst_0 = np.copy(obst_init)
+    for p in starting_locs:
+        obst_0 = circle(obst_0, (int(p[1] * GRID_D), int(GRID_H - p[0] * GRID_D)), TOTAL_GRID_CLEARANCE, 0, -1)
+        obst_0 = np.reshape(obst_0, (GRID_H, GRID_W, 1)).astype('uint8')
+    obst = np.concatenate((obst, obst_0), axis=2).astype('uint8')
+
+    # for each robot
+    #     publish a plan request to planner
+    #     subscribe to planner to receive request  ->  spin_once
+    #     handle plan received
+    #         go through the backtrack path
+    #         add locations to obst time
+    #         add path to msg having list of paths for all bots
+
+    # plan paths for each robot in a random order
+    bot_order = range(num_of_bots)
+    shuffle(bot_order)
+    for bot_i in bot_order:
+        rospy.sleep(0.5)
+        # define start and goal points
+        ii = starting_locs[bot_i][1]
+        ij = starting_locs[bot_i][0]
+        fi = goal_locs[bot_i][1]
+        fj = goal_locs[bot_i][0]
+
+        try:
+            angle_to_center = atan((ij - BOARD_H/2)/(ii - BOARD_W/2))
+            angle_to_center = angle_to_center * 180 / PI
+        except ZeroDivisionError:
+            if ij > BOARD_H/2:
+                angle_to_center = -90
+            else:
+                angle_to_center = 90
+
+        init_plan(ii, ij, fi, fj, angle_to_center, obst)
 
 
 if __name__ == "__main__":
     # Init ROS elements and get parameters
     rospy.init_node(ROS_NODE_NAME)
-    robot_r = get_rosparam("/terple/robot_description/r")
-    robot_L = get_rosparam("/terple/robot_description/L")
+    robot_r = rospy.get_param("/terple/robot_description/r")
+    robot_L = rospy.get_param("/terple/robot_description/L")
+    ROBOT_RADIUS = rospy.get_param("/terple/robot_description/ROBOT_RADIUS")
+    CLEARANCE = rospy.get_param("/terple/space_description/CLEARANCE")
     BOARD_H = rospy.get_param("/terple/space_description/BOARD_H")
     BOARD_W = rospy.get_param("/terple/space_description/BOARD_W")
     BOARD_O = rospy.get_param("/terple/space_description/BOARD_O")
     GRID_D = rospy.get_param("/terple/space_description/GRID_D")
+    WHEEL_SPEED_MAJOR = rospy.get_param("/terple/movement_description/WHEEL_SPEED_MAJOR")
+    WHEEL_SPEED_MINOR = rospy.get_param("/terple/movement_description/WHEEL_SPEED_MINOR")
     GRID_H = BOARD_H * GRID_D
     GRID_W = BOARD_W * GRID_D
     GRID_O = int(360 / BOARD_O)
+    GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
+    GRID_CLEARANCE = ROBOT_RADIUS * GRID_D
+    TOTAL_GRID_CLEARANCE = int(round(GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
 
     main()

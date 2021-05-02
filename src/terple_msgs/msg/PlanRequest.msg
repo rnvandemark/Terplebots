@@ -9,3 +9,6 @@ float64 wheel_speed_minor
 
 # The faster wheel speed
 float64 wheel_speed_major
+
+# The obstacle space-time data
+uint16[] obst

@@ -2,6 +2,7 @@
 
 import numpy as np
 from math import sqrt
+from cv2 import circle
 
 
 # ROBOT_RADIUS = rospy.get_param("/terple/robot_description/ROBOT_RADIUS")
@@ -65,6 +66,7 @@ def setup_graph(ROBOT_RADIUS, CLEARANCE, BOARD_H, BOARD_W, GRID_D, point_robot=T
     GRID_W = BOARD_W * GRID_D
     GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
     GRID_CLEARANCE = CLEARANCE * GRID_D
+    r = int(round(GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
 
     obst = np.ones((GRID_H, GRID_W))
 
@@ -72,6 +74,7 @@ def setup_graph(ROBOT_RADIUS, CLEARANCE, BOARD_H, BOARD_W, GRID_D, point_robot=T
     if quads == [[]] and elips == [[]]:
         return obst
 
+    # draw the regular obstacles
     for x in range(GRID_W):
         for y in range(GRID_H):
             for quad in quads:  # check quads
@@ -88,7 +91,6 @@ def setup_graph(ROBOT_RADIUS, CLEARANCE, BOARD_H, BOARD_W, GRID_D, point_robot=T
         return obst
 
     newObst = np.ones((GRID_H, GRID_W))  # create new obstacle array that will have r
-    r = int(round(GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
     for x in range(GRID_W):
         for y in range(GRID_H):
             for i in range(x - r, x + r):  # window each pixel and check for an obstacle in radius

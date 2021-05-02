@@ -13,6 +13,7 @@ catkin_package(CATKIN_DEPENDS
 )
 
 catkin_install_python(PROGRAMS
+  nodes/DecentralizedSensingSimulator.py
   nodes/Manager_C.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

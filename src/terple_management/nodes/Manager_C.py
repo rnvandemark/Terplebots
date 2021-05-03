@@ -8,9 +8,14 @@ from random import sample, shuffle
 from terple_msgs.msg import PlanRequest, NeighborsPose2D, BacktrackNode, MoveCommand, Path
 # from geometry_msgs.msg import Pose2D, Twist, Pose, Point, Quaternion
 from geometry_msgs.msg import Pose2D
-
+from sys import stdout
 
 ROS_NODE_NAME = "centralized_manager"
+
+
+def printr(text):
+    stdout.write("\r" + text)
+    stdout.flush()
 
 
 def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, scl=None):
@@ -32,12 +37,12 @@ def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, scl=None):
         ys = yn
 
         # do the movement math
-        dd = 0.5 * r * (ul + ur) * dt
+        dd = 0.5 * robot_r * (ul + ur) * dt
         dxn = dd * cos(theta_rad)
         dyn = dd * sin(theta_rad)
         xn += dxn
         yn += dyn
-        theta_rad += ((r / L) * (ur - ul) * dt)
+        theta_rad += ((robot_r / robot_L) * (ur - ul) * dt)
         dist_traveled += sqrt(dxn ** 2 + dyn ** 2)
 
         if img:
@@ -142,9 +147,9 @@ class DoublyLinkNode(object):
 
     # Helper function to remove this node from a chain it's in
     def remove_from_chain(self):
-        if self.link_parent != None:
+        if self.link_parent is not None:
             self.link_parent.link_child = self.link_child
-        if self.link_child != None:
+        if self.link_child is not None:
             self.link_child.link_parent = self.link_parent
         self.link_parent = None
         self.link_child = None
@@ -171,8 +176,8 @@ class Maze(object):
     wheel_speeds = None
 
     # Build the graph with the list of semi-algebraic models
-    def __init__(self, r, L, obstacles):
-        self.obst = obstacles  # creates the obstacle space. 0 for obstacle, 1 for open space [y, x, t]
+    def __init__(self, obst):
+        self.obst = obst  # creates the obstacle space. 0 for obstacle, 1 for open space [y, x, t]
         self.wheel_speeds = (
             int(WHEEL_SPEED_MINOR * 0.75),
             WHEEL_SPEED_MINOR,
@@ -182,11 +187,12 @@ class Maze(object):
 
     # Determine if a coordinate pair is in a traversable portion of the maze
     def is_in_board(self, j, i):
-        sh = self.obst.shape
-        return (j >= 0) and (i >= 0) and (j < sh[0]) and (i < sh[1]) and (self.obst[j, i, 0] == 1)
+        sh = self.obst.space_time.shape
+        return (j >= 0) and (i >= 0) and (j < sh[0]) and (i < sh[1]) and self.obst.in_board(j, i)
 
     # Calculate the distance between two points
-    def dist(self, n1, n2):
+    @staticmethod
+    def dist(n1, n2):
         return sqrt((n2[1] - n1[1]) ** 2 + (n2[0] - n1[0]) ** 2)
 
     # Calculate the tentative remaining distance from n to goal, given this heuristic
@@ -202,8 +208,6 @@ class Maze(object):
                 if self.is_in_board(j, i):
                     for o in range(GRID_O):
                         v = (j, i, o)
-                        a = None
-                        b = None
                         if v == start:
                             a = 0
                             b = self.h(start, goal)
@@ -250,18 +254,14 @@ class Maze(object):
             # Get each of the neighbors of the node being visited by looping through the five possible actions
             nj, ni, orientation = nP
             for Uln, Urn in MazeVertexNode.WHEEL_SPEEDS_TO_NEIGHBORS:
-                Ul = self.robo_desc.wheel_speeds[Uln]
-                Ur = self.robo_desc.wheel_speeds[Urn]
+                Ul = self.wheel_speeds[Uln]
+                Ur = self.wheel_speeds[Urn]
                 actual_ii, actual_jj, actual_ori, dist_traveled, dt = curve(
                     ni,
                     nj,
                     orientation,
                     Ul,
-                    Ur,
-                    r,
-                    L,
-                    GRID_D,
-                    GRID_H
+                    Ur
                 )
                 ii = int(actual_ii)
                 jj = int(actual_jj)
@@ -276,14 +276,8 @@ class Maze(object):
                     continue
 
                 # check if neighbor_node conflicts with another bot in space-time obst space
-                if tt > self.obst.shape[2]:  # time exceeds bounds, use last known pose of each bot
-                    if self.obst[jj, ii, -1] == 0:
-                        continue
-                elif self.obst[jj, ii, tt] == 0:  # time is within bounds, check normally
+                if not self.obst.is_valid(ii, jj, tt):
                     continue
-
-                # valid node in time, add time to neighbor_node
-                neighbor_node.time = tt
 
                 # Add the position of this neighbor to visualize later
                 moves_to_neighbors.append(MoveCommand(
@@ -301,6 +295,7 @@ class Maze(object):
                     neighbor_node.parent = visiting_link.vertex_node
                     neighbor_node.twist_elements_to_here = (Ul, Ur, dt)
                     neighbor_node.actual_position = (actual_jj, actual_ii, actual_ori)
+                    neighbor_node.time = tt
 
                     # Do a less costly sort by simply moving the neighbor node in the priority queue
                     if neighbor_position not in chain_links_map:
@@ -331,24 +326,22 @@ class Maze(object):
                 time=tP
             ))
             idx = idx + 1
-            printr("Planning{0}".format("." * (idx // 2000)))
+            # printr("Planning{0}".format("." * (idx // 2000)))
 
-        print
         return final_node, nodes_visited
 
 
 def init_plan(ii, ij, fi, fj, angle_to_center, obst):
-    # path_msg = Path()
-    # path_msg.success = False
-    # path_msg.request = msg
-
     s = int(ij * GRID_D), int(ii * GRID_D), angle_to_center
     g = int(fj * GRID_D), int(fi * GRID_D), 0
 
-    maze = Maze(robot_r, robot_L, obst)
+    # create graph
+    maze = Maze(obst)
 
+    # search for goal with A*
     final_node, nodes_visited = maze.astar(s, g)
 
+    # backtrack the search graph to get the path to goal
     backtrack_path = []
     n = final_node
     while n is not None:
@@ -364,13 +357,89 @@ def init_plan(ii, ij, fi, fj, angle_to_center, obst):
                 time_elapsed=n.twist_elements_to_here[2]),
             time=n.time
         ))
+        # print n.time, n.parent.time
         n = n.parent
 
-    # path_msg.success = (final_node is not None)
-    # path_msg.explored = nodes_visited
-    # path_msg.backtrack_path = backtrack_path
-    #
-    # pub.publish(path_msg)
+    #      success                   path
+    return (final_node is not None), backtrack_path
+
+
+class Obstacles(object):
+    # An empty board
+    empty = None
+
+    # The initial bot positions
+    start = None
+
+    # The full space-time log
+    space_time = None
+
+    def __init__(self, starting_locs):
+        self.empty = np.ones((GRID_H, GRID_W)).astype('uint8')
+        self.space_time = np.ones((GRID_H, GRID_W, 1)).astype('uint8')
+        self.startup(starting_locs)
+        self.start = self.space_time[:, :, 0]
+
+    # Record an y,x,t point as an obstacle
+    def mark(self, y, x, t):
+        y, x, t = int(round(y)), int(round(x)), int(t)
+        self.space_time[:, :, t] = circle(np.ascontiguousarray(self.space_time[:, :, t]), (x, GRID_H - y), TOTAL_GRID_CLEARANCE, 0, -1)
+
+    # Mark the starting locations
+    def startup(self, starting_locs):
+        for p in starting_locs:
+            self.mark(int(p[1] * GRID_D), int(GRID_H - p[0] * GRID_D), 0)
+
+    # Check if a point is within an y,x,t obstacle
+    def is_valid(self, y, x, t):
+        y, x, t = int(round(y)), int(round(x)), int(t)
+        # check if point is farther in future than obst already extends
+
+        # if last stored is start, return True
+        if self.space_time.shape[2] == 1:
+            return True
+
+        try:  # time layer exists
+            if self.space_time[y, x, t] == 1:
+                return True
+            return False
+        except IndexError:  # time layer does not exist yet, use last time stored instead
+            if self.space_time[y, x, -1] == 1:
+                return True
+            return False
+
+    # Check if time layer exists already
+    def time_layer_exists(self, t):
+        return self.space_time.shape[2] >= t + 1
+
+    # Check if a point is within a static obstacle
+    # Empty for now because there are no status obstacles
+    @staticmethod
+    def in_board(y, x):
+        y, x = int(round(y)), int(round(x))
+        return True
+
+    # Add layer to the top of space_time
+    def join_layers(self, layer):
+        layer = np.reshape(layer, (GRID_H, GRID_W, 1)).astype('uint8')
+        self.space_time = np.concatenate((self.space_time, layer), axis=2).astype('uint8')
+
+    # Take a path and update obst space-time to reflect moving bot
+    def update_from_path(self, path):
+        for node in path:  # draw each node on the path
+            x = node.position.x
+            y = node.position.y
+            t = node.time
+            # print "Adding {0} to obst".format((y, x, t))
+            if not self.time_layer_exists(t):  # time layer doesnt exist yet
+                # add a new time layer as a copy of previous layer
+                # if going to copy start layer, ignore starting bot locations
+                if t == 1:  # first movement layer
+                    self.join_layers(self.empty)
+                    self.mark(y, x, t)
+                else:  # later layer, add copy of previous layer
+                    self.join_layers(self.space_time[:, :, -1])
+            self.mark(y, x, t)
 
 
 def main():
@@ -380,59 +449,61 @@ def main():
 
     # get starting locations
     starting_locs = []  # [y, x] locations of bot spawns
-    rad_btwn_bots = 2*PI/num_of_bots
+    starting_angles = []  # angle from start to goal
+    rad_btwn_bots = 2 * PI / num_of_bots
     for i in range(num_of_bots):  # arrange points in a circle
         starting_locs.append([
-            BOARD_H/2 + sin(rad_btwn_bots * i) * bot_spawn_radius,
-            BOARD_W/2 + cos(rad_btwn_bots * i) * bot_spawn_radius
+            BOARD_H / 2 + sin(rad_btwn_bots * i) * bot_spawn_radius,
+            BOARD_W / 2 + cos(rad_btwn_bots * i) * bot_spawn_radius
         ])
+        # figure out the 0 - BOARD_O angle to get from start to goal
+        a = i * rad_btwn_bots * 180 / PI
+        a = int(a / BOARD_O)
+        if a < GRID_O/2:
+            a += GRID_O/2
+        else:
+            a -= GRID_D/2
+        starting_angles.append(a)
 
     # rearrange list elements to get goal locations around the circle
-    goal_locs = sample(starting_locs, k=num_of_bots)
+    # make sure all bots need to move - ie. goal!=start for all bots
+    while True:
+        goal_locs = sample(starting_locs, k=num_of_bots)
+        for i in range(num_of_bots):
+            if goal_locs[i] == starting_locs[i]:  # bot wouldn't move
+                break
+        else:
+            break
 
-    # initialize the grid
-    # obst_init = obstacles.setup_graph(ROBOT_RADIUS, CLEARANCE, BOARD_H, BOARD_W, GRID_D, starts=starting_locs)
-    obst_init = np.ones((GRID_H, GRID_W)).astype('uint8')
-
-    # prepare grid for time dimension
-    obst = np.ones((GRID_H, GRID_W, 0)).astype('uint8')
-
-    # draw the initial robot circles on grid t=0
-    obst_0 = np.copy(obst_init)
-    for p in starting_locs:
-        obst_0 = circle(obst_0, (int(p[1] * GRID_D), int(GRID_H - p[0] * GRID_D)), TOTAL_GRID_CLEARANCE, 0, -1)
-        obst_0 = np.reshape(obst_0, (GRID_H, GRID_W, 1)).astype('uint8')
-    obst = np.concatenate((obst, obst_0), axis=2).astype('uint8')
-
-    # for each robot
-    #     publish a plan request to planner
-    #     subscribe to planner to receive request  ->  spin_once
-    #     handle plan received
-    #         go through the backtrack path
-    #         add locations to obst time
-    #         add path to msg having list of paths for all bots
+    # initialize the obstacle grid
+    obst = Obstacles(starting_locs)
 
     # plan paths for each robot in a random order
     bot_order = range(num_of_bots)
     shuffle(bot_order)
     for bot_i in bot_order:
-        rospy.sleep(0.5)
+        print "\nPlanning for Bot {0}".format(bot_i)
+
         # define start and goal points
         ii = starting_locs[bot_i][1]
         ij = starting_locs[bot_i][0]
         fi = goal_locs[bot_i][1]
         fj = goal_locs[bot_i][0]
+        angle_to_center = starting_angles[bot_i]
 
-        try:
-            angle_to_center = atan((ij - BOARD_H/2)/(ii - BOARD_W/2))
-            angle_to_center = angle_to_center * 180 / PI
-        except ZeroDivisionError:
-            if ij > BOARD_H/2:
-                angle_to_center = -90
-            else:
-                angle_to_center = 90
+        # Find the path
+        success, backtrack = init_plan(ii, ij, fi, fj, angle_to_center, obst)
 
-        init_plan(ii, ij, fi, fj, angle_to_center, obst)
+        # Check for failure
+        if not success:
+            print "Failed to find path for Bot {0}! Exiting...".format(bot_i)
+            return
+        else:
+            print "Found Path for Bot {0}".format(bot_i)
+
+        backtrack.reverse()
+        obst.update_from_path(backtrack)
+        print "Updated Obst from Bot {0} Path".format(bot_i)
 
 
 if __name__ == "__main__":
@@ -456,3 +527,10 @@ if __name__ == "__main__":
     TOTAL_GRID_CLEARANCE = int(round(GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
 
     main()
+
+# # draw the initial robot circles on grid t=0
+# obst_0 = np.copy(obst_init)
+# for p in starting_locs:
+#     obst_0 = circle(obst_0, (int(p[1] * GRID_D), int(GRID_H - p[0] * GRID_D)), TOTAL_GRID_CLEARANCE, 0, -1)
+#     obst_0 = np.reshape(obst_0, (GRID_H, GRID_W, 1)).astype('uint8')
+# obst = np.concatenate((obst, obst_0), axis=2).astype('uint8')

@@ -1,0 +1,24 @@
+<!-- This should not be called manually, but rather by other launch files -->
+<launch>
+  <!-- Required input args -->
+  <arg name="robot_id" />
+  <arg name="node_name_base" />
+
+  <!-- Calculated values given input args -->
+  <arg name="next_robot_id" value="$(eval arg('robot_id')-1)" />
+  <arg name="node_name_planner" value="$(eval arg('node_name_base') + '_planner')" />
+
+  <!-- Create anonymous node to spawn the decentralized terple planner -->
+  <node
+    name="$(eval anon(arg('node_name_planner')))"
+    pkg="terple_planning"
+    type="DecentralizedRobotPlanner.py"
+    args="$(arg robot_id)"
+    output="screen" />
+
+  <!-- Place recursive call if remaining robot count is greater than zero -->
+  <include file="$(find terple_sim)/launch/spawn_terplebot.launch" if="$(eval arg('next_robot_id') > 0)">
+     <arg name="robot_id" value="$(arg next_robot_id)"/>
+     <arg name="node_name_base" value="$(arg node_name_base)"/>
+  </include>
+</launch>

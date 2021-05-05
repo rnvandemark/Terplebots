@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 import rospy
-from terple_msgs.msg import RobotExternalCharacteristics, DecentralizedRobotReadings, Vector2
-from threading import Lock
+from terple_msgs.msg import DecentralizedProgram, RobotExternalCharacteristics, DecentralizedRobotReadings, DecentralizedRobotStatus, Vector2
+from std_msgs.msg import Empty
 from math import sqrt, sin, cos, atan2
 from sys import argv as sargv
 
@@ -117,8 +117,8 @@ class CircleSemiAlgebraicModel(object):
 # A representation of a single, orphaned terplebot
 class Terplebot(object):
 
-    # Mutex to access the characteristics in this object safely across threads
-    mutex = None
+    # Whether or not this robot is participating in the current program
+    is_in_program = None
 
     # Whether or not the initial characteristics have been set
     initialized = None
@@ -135,21 +135,44 @@ class Terplebot(object):
     # The destination waypoint
     objective = None
 
+    # Whether or not this bot has reached the objective
+    finished = None
+
+    # A list of positions visited, including start and finish
+    visited = None
+
     # Constructor
     def __init__(self, robot_id, radius, max_vel):
-        self.mutex = Lock()
-        self.initialized = False
         self.max_vel = max_vel
         self.own_ext_char = RobotExternalCharacteristics(robot_id=robot_id, position=None, velocity=None, radius=radius)
-        self.sensor_readings = None
+        self.clear()
 
-    # Update the 'sensor readings' that this robot has of the other robots' external characteristics
-    def set_sensor_readings(self, readings):
-        self.mutex.acquire()
-        try:
-            self.sensor_readings = readings
-        finally:
-            self.mutex.release()
+    # Clear any data specific to a run
+    def clear(self):
+        self.is_in_program = False
+        self.initialized = False
+        self.own_ext_char.position = None
+        self.own_ext_char.velocity = None
+        self.sensor_readings = None
+        self.objective = None
+        self.finished = False
+        self.visited = []
+
+    # Whether or not this robot can be considered at its objective position
+    def is_at_objective(self):
+        dx = self.objective.x - self.own_ext_char.position.x
+        dy = self.objective.y - self.own_ext_char.position.y
+        return sqrt(dx**2 + dy**2) < 0.025
+
+    # Use the maximum allowable velocity, orientation between the current and goal positions, and
+    # time to pass to calculate the preferred velocity
+    def calculate_preferred_velocity(self, dt):
+        displacement = vec2_diff(self.objective, self.own_ext_char.position)
+        v_pref = vec2_div(displacement, dt)
+        if sqrt(v_pref.x**2 + v_pref.y**2) > self.max_vel:
+            angle = atan2(v_pref.y, v_pref.x)
+            v_pref = Vector2(x=self.max_vel*cos(angle),y=self.max_vel*sin(angle))
+        return v_pref
 
 # A model for a velocity obstacle
 class VelocityObstacleModel(object):
@@ -299,33 +322,95 @@ class ORCAAModel(object):
 # tau: the time window to hopefully guarantee no collisions for
 def build_ORCA_A_tau_for(terplebot, tau):
     orcaA = None
-    terplebot.mutex.acquire()
-    try:
-        if terplebot.initialized:
-            rA = terplebot.own_ext_char.radius
-            pA = terplebot.own_ext_char.position
-            vA_opt = get_opt_vel(terplebot.own_ext_char.velocity)
-            orcaA = ORCAAModel(terplebot.max_vel)
-            for other_ext_char in terplebot.sensor_readings.data:
-                if terplebot.own_ext_char.robot_id == other_ext_char.robot_id:
-                    continue
-                voAB = VelocityObstacleModel(rA, other_ext_char.radius, pA, other_ext_char.position, tau)
-                dv_opt = vec2_diff(vA_opt, get_opt_vel(other_ext_char.velocity))
-                if voAB.contains(dv_opt):
-                    u_to_boundary, _, _ = voAB.boundary_point_closest_to(dv_opt)
-                    half_plane_point = vec2_sum(vA_opt, vec2_div(u_to_boundary, 2))
-                    half_plane_equation = get_line_from_slope_and_point(
-                        -u_to_boundary.x / u_to_boundary.y,
-                        half_plane_point
-                    )
-                    orcaA.append_orca_tau_AX(half_plane_equation, False)
-    finally:
-        terplebot.mutex.release()
+    if terplebot.initialized:
+        rA = terplebot.own_ext_char.radius
+        pA = terplebot.own_ext_char.position
+        vA_opt = get_opt_vel(terplebot.own_ext_char.velocity)
+        orcaA = ORCAAModel(terplebot.max_vel)
+        for other_ext_char in terplebot.sensor_readings.data:
+            if terplebot.own_ext_char.robot_id == other_ext_char.robot_id:
+                continue
+            voAB = VelocityObstacleModel(rA, other_ext_char.radius, pA, other_ext_char.position, tau)
+            dv_opt = vec2_diff(vA_opt, get_opt_vel(other_ext_char.velocity))
+            if voAB.contains(dv_opt):
+                u_to_boundary, _, _ = voAB.boundary_point_closest_to(dv_opt)
+                half_plane_point = vec2_sum(vA_opt, vec2_div(u_to_boundary, 2))
+                half_plane_equation = get_line_from_slope_and_point(
+                    -u_to_boundary.x / u_to_boundary.y,
+                    half_plane_point
+                )
+                orcaA.append_orca_tau_AX(half_plane_equation, False)
     return orcaA
+
+# Handle the start of a new program
+def program_callback(msg, terplebot, robot_status_pub):
+    idx = None
+    try:
+        idx = msg.robot_ids.index(terplebot.own_ext_char.robot_id)
+    except:
+        return
+
+    terplebot.clear()
+    terplebot.is_in_program = True
+    terplebot.own_ext_char.position = msg.start_positions[idx]
+    terplebot.own_ext_char.velocity = ORIGIN
+    terplebot.objective = msg.goal_positions[idx]
+    terplebot.visited.append(terplebot.own_ext_char.position)
+
+    robot_status_pub.publish(DecentralizedRobotStatus(
+        robot_id=terplebot.own_ext_char.robot_id,
+        finished=terplebot.is_at_objective()
+    ))
+    rospy.sleep(2)
 
 # Set a bot's readings of external characteristics
 def robot_readings_callback(msg, terplebot):
-    terplebot.set_sensor_readings(msg)
+    if not terplebot.is_in_program:
+        return
+
+    terplebot.sensor_readings = msg
+    terplebot.initialized = True
+
+# Receive a notification to step for the next tau duration of time
+def step_callback(terplebot, char_updates_pub, robot_status_pub, taut, taua):
+    if not terplebot.is_in_program:
+        return
+
+    status = DecentralizedRobotStatus(
+        robot_id=terplebot.own_ext_char.robot_id,
+        finished=terplebot.finished
+    )
+
+    if terplebot.initialized and (not terplebot.finished):
+        # Do routine, update position and velocity
+        v_new = ORIGIN
+        orcaA = build_ORCA_A_tau_for(terplebot, taut)
+        if orcaA is not None:
+            is_valid, v_potential = orcaA.calculate_next_velocity(
+                terplebot.calculate_preferred_velocity(taut)
+            )
+            if is_valid:
+                v_new = v_potential
+
+        before = terplebot.own_ext_char.position
+        terplebot.own_ext_char.velocity = v_new
+        terplebot.own_ext_char.position = vec2_translate(
+            terplebot.own_ext_char.position,
+            terplebot.own_ext_char.velocity.x * taut,
+            terplebot.own_ext_char.velocity.y * taut
+        )
+
+        if terplebot.is_at_objective():
+            terplebot.own_ext_char.position = terplebot.objective
+            terplebot.finished = True
+            status.finished = True
+
+        terplebot.visited.append(terplebot.own_ext_char.position)
+
+    status.path.data = terplebot.visited
+
+    char_updates_pub.publish(terplebot.own_ext_char)
+    robot_status_pub.publish(status)
 
 def main():
     # Capture required user input
@@ -367,20 +452,33 @@ def main():
         RobotExternalCharacteristics,
         queue_size=1
     )
+    robot_status_pub = rospy.Publisher(
+        "/terple/decentralized/robot_status",
+        DecentralizedRobotStatus,
+        queue_size=1
+    )
+    decentralized_program_sub = rospy.Subscriber(
+        "/terple/decentralized/programs",
+        DecentralizedProgram,
+        lambda m: program_callback(m, terplebot, robot_status_pub),
+        queue_size=1
+    )
+    step_sub = rospy.Subscriber(
+        "/terple/decentralized/step",
+        Empty,
+        lambda m: step_callback(
+            terplebot,
+            characteristics_updates_pub,
+            robot_status_pub,
+            tau_seconds_theoretical,
+            tau_seconds_actual
+        ),
+        queue_size=1
+    )
 
     # Start spin routine
-    ros_duration = rospy.Duration(tau_seconds_actual)
-    while not rospy.is_shutdown():
-        # The robot is accepting readings in another threads whenever they are made available
-        terplebot.mutex.acquire()
-        try:
-            if terplebot.initialized:
-                self.sensor_readings = readings
-        finally:
-            terplebot.mutex.release()
-
-        # Sleep for tau actual
-        ros_duration.sleep()
+    rospy.loginfo("Node for robot with ID={0} is ready.".format(terplebot.own_ext_char.robot_id))
+    rospy.spin()
 
 if __name__ == "__main__":
     main()

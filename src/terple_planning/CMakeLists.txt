@@ -12,8 +12,5 @@ catkin_package(CATKIN_DEPENDS
 )
 
 catkin_install_python(PROGRAMS
-  nodes/Planner_C.py
-  nodes/Visualizer_C.py
-  nodes/PlanRequester_C.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

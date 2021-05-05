@@ -9,6 +9,7 @@ add_message_files(FILES
   NeighborsPose2D.msg
   Path.msg
   PlanRequest.msg
+  AllPaths.msg
 )
 
 generate_messages(DEPENDENCIES geometry_msgs)

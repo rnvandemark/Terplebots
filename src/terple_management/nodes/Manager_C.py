@@ -3,12 +3,14 @@
 import numpy as np
 from cv2 import circle, line
 import rospy
-from math import sqrt, atan, cos, sin, pi as PI
-from random import sample, shuffle
-from terple_msgs.msg import PlanRequest, NeighborsPose2D, BacktrackNode, MoveCommand, Path
+from math import sqrt, cos, sin, pi as PI
+from random import sample, shuffle, seed
+from terple_msgs.msg import NeighborsPose2D, BacktrackNode, MoveCommand, Path, AllPaths
 # from geometry_msgs.msg import Pose2D, Twist, Pose, Point, Quaternion
 from geometry_msgs.msg import Pose2D
 from sys import stdout
+import matplotlib.pyplot as plt
+
 
 ROS_NODE_NAME = "centralized_manager"
 
@@ -276,7 +278,8 @@ class Maze(object):
                     continue
 
                 # check if neighbor_node conflicts with another bot in space-time obst space
-                if not self.obst.is_valid(ii, jj, tt):
+                if not self.obst.is_valid(jj, ii, tt):
+                    # print "not valid", (jj, ii, tt)
                     continue
 
                 # Add the position of this neighbor to visualize later
@@ -331,7 +334,7 @@ class Maze(object):
         return final_node, nodes_visited
 
 
-def init_plan(ii, ij, fi, fj, angle_to_center, obst):
+def make_plan(ii, ij, fi, fj, angle_to_center, obst):
     s = int(ij * GRID_D), int(ii * GRID_D), angle_to_center
     g = int(fj * GRID_D), int(fi * GRID_D), 0
 
@@ -374,21 +377,27 @@ class Obstacles(object):
     # The full space-time log
     space_time = None
 
+    # A log of the points that the bots have been
+    # Each entry in the points list is a list of all (y, x, t) that a bot_i has been
+    points = None
+
     def __init__(self, starting_locs):
         self.empty = np.ones((GRID_H, GRID_W)).astype('uint8')
         self.space_time = np.ones((GRID_H, GRID_W, 1)).astype('uint8')
         self.startup(starting_locs)
         self.start = self.space_time[:, :, 0]
+        self.points = []
 
     # Record an y,x,t point as an obstacle
     def mark(self, y, x, t):
         y, x, t = int(round(y)), int(round(x)), int(t)
-        self.space_time[:, :, t] = circle(np.ascontiguousarray(self.space_time[:, :, t]), (x, GRID_H - y), TOTAL_GRID_CLEARANCE, 0, -1)
+        self.space_time[:, :, t] = circle(np.ascontiguousarray(self.space_time[:, :, t]), (x, y),
+                                          TOTAL_GRID_CLEARANCE, 0, -1)
 
     # Mark the starting locations
     def startup(self, starting_locs):
         for p in starting_locs:
-            self.mark(int(p[1] * GRID_D), int(GRID_H - p[0] * GRID_D), 0)
+            self.mark(int(GRID_H - p[0] * GRID_D), int(p[1] * GRID_D), 0)
 
     # Check if a point is within an y,x,t obstacle
     def is_valid(self, y, x, t):
@@ -399,13 +408,18 @@ class Obstacles(object):
         if self.space_time.shape[2] == 1:
             return True
 
+        if t < 4:
+            return True
+
         try:  # time layer exists
             if self.space_time[y, x, t] == 1:
                 return True
+            # rospy.sleep(0.1)
             return False
         except IndexError:  # time layer does not exist yet, use last time stored instead
             if self.space_time[y, x, -1] == 1:
                 return True
+            # rospy.sleep(0.1)
             return False
 
     # Check if time layer exists already
@@ -416,7 +430,7 @@ class Obstacles(object):
     # Empty for now because there are no status obstacles
     @staticmethod
     def in_board(y, x):
-        y, x = int(round(y)), int(round(x))
+        # y, x = int(round(y)), int(round(x))
         return True
 
     # Add layer to the top of space_time
@@ -426,26 +440,45 @@ class Obstacles(object):
 
     # Take a path and update obst space-time to reflect moving bot
     def update_from_path(self, path):
-        for node in path:  # draw each node on the path
-            x = node.position.x
-            y = node.position.y
+        # setup for new path to be stored
+        i = len(self.points)
+        self.points.append([])
+
+        # draw nodes on obst space_time
+        for node in path:
+            x = int(round(node.position.x))
+            y = int(round(node.position.y))
             t = node.time
-            # print "Adding {0} to obst".format((y, x, t))
+
+            # add the path to self.points
+            self.points[i].append((y, x, t))
+
+            # draw the point on space_time
             if not self.time_layer_exists(t):  # time layer doesnt exist yet
-                # add a new time layer as a copy of previous layer
-                # if going to copy start layer, ignore starting bot locations
-                if t == 1:  # first movement layer
-                    self.join_layers(self.empty)
-                    self.mark(y, x, t)
-                else:  # later layer, add copy of previous layer
-                    self.join_layers(self.space_time[:, :, -1])
+                self.join_layers(self.empty)  # create a new empty time layer
+                for j in range(len(self.points)-1):  # fill it with the last known locs of the other bots
+                    (yj, xj, tj) = self.points[j][-1]  # last known loc of bot j
+                    self.mark(yj, xj, t)
+                # time layer now exists and is populated with other bots locs
             self.mark(y, x, t)
+
+        # propagate last known location of this bot up to highest time
+        while len(self.points[-1]) < len(max(self.points, key=len)):  # this path is shorter than longest path so far
+            (y, x, t) = self.points[-1][-1]  # the last know location for this bot
+            t += 1
+            self.points[-1].append((y, x, t))
+            self.mark(y, x, t)
+
+    def show(self):
+        for t in range(0, len(self.points[-1]), 2):
+            plt.imshow(self.space_time[:, :, t])
+            plt.show()
 
 
 def main():
     # set spawn parameters
-    num_of_bots = 8  # could later be changed to be user input
-    bot_spawn_radius = 4
+    num_of_bots = 12  # could later be changed to be user input
+    bot_spawn_radius = 3.5
 
     # get starting locations
     starting_locs = []  # [y, x] locations of bot spawns
@@ -462,11 +495,12 @@ def main():
         if a < GRID_O/2:
             a += GRID_O/2
         else:
-            a -= GRID_D/2
+            a -= GRID_O/2
         starting_angles.append(a)
 
     # rearrange list elements to get goal locations around the circle
     # make sure all bots need to move - ie. goal!=start for all bots
+    seed(3)
     while True:
         goal_locs = sample(starting_locs, k=num_of_bots)
         for i in range(num_of_bots):
@@ -475,13 +509,26 @@ def main():
         else:
             break
 
+    # print "\nstarts :", starting_locs
+    # print "goal   :", goal_locs, "\n"
+
     # initialize the obstacle grid
     obst = Obstacles(starting_locs)
 
     # plan paths for each robot in a random order
     bot_order = range(num_of_bots)
     shuffle(bot_order)
+    all_paths_list = [None] * num_of_bots
+    all_path_pub = rospy.Publisher(
+        '/terple/all_paths',
+        AllPaths,
+        queue_size=1
+    )
+    path_msg = Path()
     for bot_i in bot_order:
+        # if bot_i == 6:
+        #     break
+
         print "\nPlanning for Bot {0}".format(bot_i)
 
         # define start and goal points
@@ -492,18 +539,31 @@ def main():
         angle_to_center = starting_angles[bot_i]
 
         # Find the path
-        success, backtrack = init_plan(ii, ij, fi, fj, angle_to_center, obst)
+        success, backtrack = make_plan(ii, ij, fi, fj, angle_to_center, obst)
 
         # Check for failure
         if not success:
             print "Failed to find path for Bot {0}! Exiting...".format(bot_i)
             return
         else:
-            print "Found Path for Bot {0}".format(bot_i)
+            print "Found Path for Bot {0} with Length {1} steps".format(bot_i, len(backtrack))
 
+        # Convert to forward path, add to storage, update obst
         backtrack.reverse()
+        # print backtrack
+        path_msg.backtrack_path = backtrack
+        all_paths_list[bot_i] = path_msg
         obst.update_from_path(backtrack)
-        print "Updated Obst from Bot {0} Path".format(bot_i)
+
+        print obst.points[-1]
+        obst.show()
+
+    # print "(49, 54, 15)", obst.is_valid(49, 54, 15)
+    # print "(86, 52, 28)", obst.is_valid(86, 52, 28)
+    # print "(93, 47, 35)", obst.is_valid(93, 47, 35)
+
+    print "Finished Planning. Publishing Paths..."
+    all_path_pub.publish(bot_paths=all_paths_list)
 
 
 if __name__ == "__main__":
@@ -523,8 +583,8 @@ if __name__ == "__main__":
     GRID_W = BOARD_W * GRID_D
     GRID_O = int(360 / BOARD_O)
     GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
-    GRID_CLEARANCE = ROBOT_RADIUS * GRID_D
-    TOTAL_GRID_CLEARANCE = int(round(GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
+    GRID_CLEARANCE = CLEARANCE * GRID_D
+    TOTAL_GRID_CLEARANCE = int(round(2*GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
 
     main()
 

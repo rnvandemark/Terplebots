@@ -5,7 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   geometry_msgs
   gazebo_msgs
-  nhr_msgs
+  terple_msgs
 )
 
 catkin_package(CATKIN_DEPENDS

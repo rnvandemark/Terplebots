@@ -23,13 +23,14 @@
     /terple/robot_description/r: 0.038
     /terple/robot_description/L: 0.354
     /terple/robot_description/ROBOT_RADIUS: 0.153
-    /terple/space_description/CLEARANCE: 10
+    /terple/space_description/CLEARANCE: 0.3
     /terple/space_description/BOARD_H: 10
     /terple/space_description/BOARD_W: 10
     /terple/space_description/BOARD_O: 30
     /terple/space_description/GRID_D: 10
     /terple/movement_description/WHEEL_SPEED_MAJOR: 10
     /terple/movement_description/WHEEL_SPEED_MINOR: 6
+    /terple/viz_description/SCALE: 10
   </rosparam>
 
 <!--  <node-->

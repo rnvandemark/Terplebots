@@ -3,3 +3,6 @@
 # i=0 corresponds to bot_0 - ie. the bot on the +x-axis
 # Each subsequent i corresponds to the next bot CCW from the x-axis
 terple_msgs/Path[] bot_paths
+
+# The length of the longest path
+int8 max_path_length

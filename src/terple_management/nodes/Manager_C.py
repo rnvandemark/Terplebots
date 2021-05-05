@@ -10,6 +10,7 @@ from terple_msgs.msg import NeighborsPose2D, BacktrackNode, MoveCommand, Path, A
 from geometry_msgs.msg import Pose2D
 from sys import stdout
 import matplotlib.pyplot as plt
+from copy import copy
 
 
 ROS_NODE_NAME = "centralized_manager"
@@ -223,7 +224,8 @@ class Maze(object):
         chain_right_node = DoublyLinkNode.get_right_inst()
         chain_right_node.insert_as_child_to(chain_left_node)
         start_node = DoublyLinkNode(all_maze_vertex_nodes_map[start])
-        start_node.vertex_node.actual_position = start
+        actual_start = (start[0], start[1], start[2] * BOARD_O)
+        start_node.vertex_node.actual_position = actual_start
         start_node.insert_as_child_to(chain_left_node)
         chain_links_map = {start: start_node}
 
@@ -336,7 +338,7 @@ class Maze(object):
 
 def make_plan(ii, ij, fi, fj, angle_to_center, obst):
     s = int(ij * GRID_D), int(ii * GRID_D), angle_to_center
-    g = int(fj * GRID_D), int(fi * GRID_D), 0
+    g = int(fj * GRID_D), int(fi * GRID_D), angle_to_center
 
     # create graph
     maze = Maze(obst)
@@ -476,9 +478,10 @@ class Obstacles(object):
 
 
 def main():
+    rospy.sleep(1)
     # set spawn parameters
-    num_of_bots = 12  # could later be changed to be user input
-    bot_spawn_radius = 3.5
+    num_of_bots = 20  # could later be changed to be user input
+    bot_spawn_radius = 4
 
     # get starting locations
     starting_locs = []  # [y, x] locations of bot spawns
@@ -509,6 +512,7 @@ def main():
         else:
             break
 
+    # print "\nstarting angles :", starting_angles
     # print "\nstarts :", starting_locs
     # print "goal   :", goal_locs, "\n"
 
@@ -525,10 +529,8 @@ def main():
         queue_size=1
     )
     path_msg = Path()
+    max_path_length = 0
     for bot_i in bot_order:
-        # if bot_i == 6:
-        #     break
-
         print "\nPlanning for Bot {0}".format(bot_i)
 
         # define start and goal points
@@ -550,20 +552,17 @@ def main():
 
         # Convert to forward path, add to storage, update obst
         backtrack.reverse()
-        # print backtrack
         path_msg.backtrack_path = backtrack
-        all_paths_list[bot_i] = path_msg
+        all_paths_list[bot_i] = copy(path_msg)
         obst.update_from_path(backtrack)
+        if len(backtrack) > max_path_length:
+            max_path_length = len(backtrack)
 
-        print obst.points[-1]
-        obst.show()
+        # print obst.points[-1]
+        # obst.show()
 
-    # print "(49, 54, 15)", obst.is_valid(49, 54, 15)
-    # print "(86, 52, 28)", obst.is_valid(86, 52, 28)
-    # print "(93, 47, 35)", obst.is_valid(93, 47, 35)
-
-    print "Finished Planning. Publishing Paths..."
-    all_path_pub.publish(bot_paths=all_paths_list)
+    print "\nFinished Planning. Publishing Paths..."
+    all_path_pub.publish(bot_paths=all_paths_list, max_path_length=max_path_length)
 
 
 if __name__ == "__main__":

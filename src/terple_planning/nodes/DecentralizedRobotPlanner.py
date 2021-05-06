@@ -5,6 +5,7 @@ from terple_msgs.msg import DecentralizedProgram, RobotExternalCharacteristics, 
 from std_msgs.msg import Empty
 from math import sqrt, sin, cos, atan2
 from sys import argv as sargv
+import numpy as np
 
 ROS_NODE_NAME = "terple_decentralized_terplebot"
 
@@ -215,15 +216,33 @@ class VelocityObstacleModel(object):
 
     # Check that a velocity vector is within the bounds of this model
     def contains(self, v):
-        qr = quadrant(self.circle_trunc.position)
+        qr_cnt = quadrant(self.circle_trunc.position)
+        qr_pt0 = quadrant(self.points[0])
+        qr_pt1 = quadrant(self.points[1])
+
+        cond0 = sum(map(int, [
+            self.lines[0][0] > 0,
+            (qr_cnt == 2) or (qr_cnt == 3),
+            ((qr_pt1 == 1) and (qr_pt0 == 2)) or ((qr_pt1 == 3) and (qr_pt0 == 0)) or ((qr_pt1 == 3) and (qr_pt0 == 1))
+        ])) % 2 == 1
+        cond1 = sum(map(int, [
+            self.lines[1][0] < 0,
+            (qr_cnt == 2) or (qr_cnt == 3),
+            (qr_pt1 == 1) and (qr_pt0 == 3)
+        ])) % 2 == 1
+        cond2 = sum(map(int, [
+            self.lines[2][0] > 0,
+            (qr_cnt == 1) or (qr_cnt == 2)
+        ])) % 2 == 1
+
         in_legs = (
-            half_plane_contains(self.lines[0], v, (self.lines[0][0] > 0) ^ ((qr == 2) or (qr == 3)), False) and
-            half_plane_contains(self.lines[1], v, (self.lines[1][0] < 0) ^ ((qr == 2) or (qr == 3)), False)
+            half_plane_contains(self.lines[0], v, cond0, False) and
+            half_plane_contains(self.lines[1], v, cond1, False)
         )
         if self.circle_trunc.contains(v, False):
             return in_legs
         else:
-            return in_legs and half_plane_contains(self.lines[2], v, (self.lines[2][0] > 0) ^ ((qr == 1) or (qr == 2)), False)
+            return in_legs and half_plane_contains(self.lines[2], v, cond2, False)
 
     # Find the point on the boundary of the velocity obstacle that is closest to a point inside the boundary
     # Returns the the coordinate on the boundary as well as the distance
@@ -271,6 +290,9 @@ class ORCAAModel(object):
     # A disk providing a bound given the max velocity of robot A
     max_disk = None
 
+    # A padded version of max_disk, so it's slightly larger
+    max_disk_padded = None
+
     # A list of 2-tuples, where the first element is a half-plane equation and the second is
     # a boolean as to whether or not to toggle its region
     orca_tau_AXs = None
@@ -278,6 +300,7 @@ class ORCAAModel(object):
     # Construct the max bounds and initialize an empty list for ORCAs
     def __init__(self, v_max):
         self.max_disk = CircleSemiAlgebraicModel(ORIGIN, v_max)
+        self.max_disk_padded = CircleSemiAlgebraicModel(ORIGIN, v_max*1.05)
         self.orca_tau_AXs = []
 
     # Append a half-plane equation due to 
@@ -294,7 +317,7 @@ class ORCAAModel(object):
         # Initialize the new velocity as the preferred one
         is_valid = True
         v_new = v_pref
-        assert(self.max_disk.contains(v_new, False))
+        assert(self.max_disk_padded.contains(v_new, False))
         # Loop through constraints, updating the best option as v_new
         for i,(line,toggle) in enumerate(self.orca_tau_AXs):
             if not half_plane_contains(line, v_new, toggle, False):
@@ -302,19 +325,26 @@ class ORCAAModel(object):
                 if self.contains(v_original, i=i+1):
                     v_new = v_original
                 else:
-                    v_temp = v_original
-                    fdx = dx if line[0] > 0 else -dx
-                    while True:
-                        x = v_temp.x + fdx
-                        v_temp = Vector2(x=x,y=(line[0]*x)+line[1])
-                        if not self.max_disk.contains(v_temp, False):
-                            is_valid = False
+                    v_new = None
+                    for fdx in [dx, -dx]:
+                        v_temp = v_original
+                        is_valid = True
+                        while True:
+                            x = v_temp.x + fdx
+                            v_temp = Vector2(x=x,y=(line[0]*x)+line[1])
+                            if not self.max_disk.contains(v_temp, False):
+                                is_valid = False
+                                break
+                            elif self.contains(v_temp, i=i+1):
+                                v_new = v_temp
+                                break
+                        if is_valid:
                             break
-                        elif self.contains(v_temp, i=i+1):
-                            v_new = v_temp
-                            break
-                    if not is_valid:
-                        break
+                    is_valid = v_new is not None
+                if v_new is None:
+                    v_new = ORIGIN
+                    is_valid = True
+                    break
         return is_valid, v_new
 
 # Build the velocity obstacle of A induced by B for time window tau
@@ -335,10 +365,8 @@ def build_ORCA_A_tau_for(terplebot, tau):
             if voAB.contains(dv_opt):
                 u_to_boundary, _, _ = voAB.boundary_point_closest_to(dv_opt)
                 half_plane_point = vec2_sum(vA_opt, vec2_div(u_to_boundary, 2))
-                half_plane_equation = get_line_from_slope_and_point(
-                    -u_to_boundary.x / u_to_boundary.y,
-                    half_plane_point
-                )
+                m = -999999 * np.sign(u_to_boundary.x) if u_to_boundary.y == 0.0 else -u_to_boundary.x / u_to_boundary.y
+                half_plane_equation = get_line_from_slope_and_point(m, half_plane_point)
                 orcaA.append_orca_tau_AX(half_plane_equation, False)
     return orcaA
 

@@ -2,3 +2,5 @@
 uint16 robot_id
 # Whether or not this robot has reached its destination
 bool finished
+# The list of paths visited thus far
+DecentralizedPath path

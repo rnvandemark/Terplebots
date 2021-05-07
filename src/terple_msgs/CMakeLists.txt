@@ -6,6 +6,8 @@ find_package(catkin REQUIRED COMPONENTS message_generation geometry_msgs std_msg
 add_message_files(FILES
   AllPaths.msg
   BacktrackNode.msg
+  DecentralizedCombinedPaths.msg
+  DecentralizedPath.msg
   DecentralizedProgram.msg
   DecentralizedRobotReadings.msg
   DecentralizedRobotStatus.msg

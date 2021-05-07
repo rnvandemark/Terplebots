@@ -24,4 +24,10 @@
     pkg="terple_management"
     type="DecentralizedSensingSimulator.py"
     output="screen" />
+  <node
+    name="terple_decentralized_visualizer"
+    pkg="terple_sim"
+    type="DecentralizedVisualizer.py"
+    output="screen"
+    if="$(arg do_viz)" />
 </launch>

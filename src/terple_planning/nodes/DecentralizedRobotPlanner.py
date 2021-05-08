@@ -77,13 +77,17 @@ class Line(object):
     # Slope
     a = None
 
-    # Intercept
+    # Intercept (the x-intercept if the slope is infinity, y-intercept otherwise)
     b = None
 
     # Build from a slope and intercept
     def __init__(self, a, b):
         self.a = a
         self.b = b
+
+    # Get whether or not this line is vertical
+    def is_vertical(self):
+        return np.isinf(self.a)
 
     # Evaluate the line to get an x-y pair given the value for x
     def eval_at(self, x):
@@ -92,26 +96,40 @@ class Line(object):
     # Get a point on the line that is closest to the given point
     def point_closest_to(self, vec):
         x0, y0, c, d = vec.x, vec.y, -self.a, -self.b
-        denom = c**2 + 1
-        x = (x0 - (c*y0) - (c*d)) / denom
-        y = (c * (-x0 + (c*y0)) - d) / denom
-        return Vector2(x=x,y=y), Vector2(x=x-x0,y=y-y0)
+        xf = None
+        yf = None
+        if self.is_vertical():
+            yf = y0
+            xf = self.b
+        else:
+            denom = c**2 + 1
+            xf = (x0 - (c*y0) - (c*d)) / denom
+            yf = (c * (-x0 + (c*y0)) - d) / denom
+        vf = Vector2(x=xf,y=yf)
+        return vf, vec2_translate(vf, -x0, -y0)
+
+    # Helper function to get the slope and y-intercept of a line given a slope and terple_msgs.Vector2 point
+    @staticmethod
+    def from_translations_and_point(dx, dy, v, as_half_plane=False):
+        m = None
+        b = None
+        if abs(dx) < 0.000000001:
+            m = np.inf if np.sign(dx)*np.sign(dy) > 0 else np.NINF
+            b = v.x
+        else:
+            m = dy/dx
+            b = v.y - (m*v.x)
+        return HalfPlane(m,b) if as_half_plane else Line(m, b)
 
     # Helper function to get the slope and y-intercept of a line given two terple_msgs.Vector2 points
     @staticmethod
     def from_points(v1, v2, as_half_plane=False):
-        dx = v2.x-v1.x
-        if dx == 0:
-            return None,None
-        m = (v2.y-v1.y)/dx
-        b = v2.y-(m*v2.x)
-        return HalfPlane(m,b) if as_half_plane else Line(m, b)
-
-    # Helper function to get the slope and y-intercept of a line given a slope and terple_msgs.Vector2 point
-    @staticmethod
-    def from_slope_and_point(m, v, as_half_plane=False):
-        b = v.y - (m*v.x)
-        return HalfPlane(m,b) if as_half_plane else Line(m, b)
+        return Line.from_translations_and_point(
+            v2.x-v1.x,
+            v2.y-v1.y,
+            v1,
+            as_half_plane=as_half_plane
+        )
 
 # A half-plane equation, which is also a line
 class HalfPlane(Line):
@@ -393,9 +411,8 @@ def build_ORCA_A_tau_for(terplebot, tau):
             if voAB.contains(dv_opt):
                 u_to_boundary, _, _ = voAB.boundary_point_closest_to(dv_opt)
                 half_plane_point = vec2_sum(vA_opt, vec2_div(u_to_boundary, 2))
-                m = -999999 * np.sign(u_to_boundary.x) if u_to_boundary.y == 0.0 else -u_to_boundary.x / u_to_boundary.y
                 orcaA.append_orca_tau_AX(
-                    Line.from_slope_and_point(m, half_plane_point, as_half_plane=True),
+                    Line.from_translations_and_point(u_to_boundary.y, -u_to_boundary.x, half_plane_point, as_half_plane=True),
                     False
                 )
     return orcaA

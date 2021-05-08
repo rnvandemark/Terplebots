@@ -23,19 +23,9 @@ def printr(text):
     stdout.write("\r" + text)
     stdout.flush()
 
-# Helper function to get the slope and y-intercept of a line given two terple_msgs.Vector2 points
-def get_line_from_points(v1, v2):
-    dx = v2.x-v1.x
-    if dx == 0:
-        return None,None
-    m = (v2.y-v1.y)/dx
-    b = v2.y-(m*v2.x)
-    return m,b
-
-# Helper function to get the slope and y-intercept of a line given a slope and terple_msgs.Vector2 point
-def get_line_from_slope_and_point(m, v):
-    b = v.y - (m*v.x)
-    return m,b
+# Helper function to get the x-y coords of a terple_msgs.Vector2 as a str
+def vec2_str(v):
+    return "({0},{1})".format(v.x,v.y)
 
 # Helper function to get the tranalte a terple_msgs.Vector2 element by (dx,dy)
 def vec2_translate(v, dx, dy):
@@ -59,6 +49,10 @@ def vec2_div(v, c):
         y=v.y/c
     )
 
+# Helper function to get the magnitude of the vector
+def vec2_mag(v):
+    return sqrt(v.x**2 + v.y**2)
+
 # Helper function to get quadrant number given a 2D vector
 def quadrant(v):
     if v.x >= 0:
@@ -72,26 +66,67 @@ def quadrant(v):
         else:
             return 2
 
-# Helper function to query if a point is in the acceptable portion of a half-plane
-def half_plane_contains(line, vec, toggle, is_open):
-    a = (line[0]*vec.x) + line[1] - vec.y
-    if toggle:
-        return a > 0 if is_open else a >= 0
-    else:
-        return a < 0 if is_open else a <= 0
-
-# Helper function to get a point on the given line that is closest to the given point
-def point_on_line_closest_to(line, vec):
-    x0, y0, a, c = vec.x, vec.y, -line[0], -line[1]
-    denom = a**2 + 1
-    x = (x0 - (a*y0) - (a*c)) / denom
-    y = (a * (-x0 + (a*y0)) - c) / denom
-    return Vector2(x=x,y=y), Vector2(x=x-x0,y=y-y0)
-
 # Given the current velocity, calculate the optimal velocity
 def get_opt_vel(curr_vel):
     return curr_vel
     #return ORIGIN
+
+# A class to represent a line
+class Line(object):
+
+    # Slope
+    a = None
+
+    # Intercept
+    b = None
+
+    # Build from a slope and intercept
+    def __init__(self, a, b):
+        self.a = a
+        self.b = b
+
+    # Evaluate the line to get an x-y pair given the value for x
+    def eval_at(self, x):
+        return Vector2(x=x,y=(self.a*x)+self.b)
+
+    # Get a point on the line that is closest to the given point
+    def point_closest_to(self, vec):
+        x0, y0, c, d = vec.x, vec.y, -self.a, -self.b
+        denom = c**2 + 1
+        x = (x0 - (c*y0) - (c*d)) / denom
+        y = (c * (-x0 + (c*y0)) - d) / denom
+        return Vector2(x=x,y=y), Vector2(x=x-x0,y=y-y0)
+
+    # Helper function to get the slope and y-intercept of a line given two terple_msgs.Vector2 points
+    @staticmethod
+    def from_points(v1, v2, as_half_plane=False):
+        dx = v2.x-v1.x
+        if dx == 0:
+            return None,None
+        m = (v2.y-v1.y)/dx
+        b = v2.y-(m*v2.x)
+        return HalfPlane(m,b) if as_half_plane else Line(m, b)
+
+    # Helper function to get the slope and y-intercept of a line given a slope and terple_msgs.Vector2 point
+    @staticmethod
+    def from_slope_and_point(m, v, as_half_plane=False):
+        b = v.y - (m*v.x)
+        return HalfPlane(m,b) if as_half_plane else Line(m, b)
+
+# A half-plane equation, which is also a line
+class HalfPlane(Line):
+
+    # Build from a slope and intercept
+    def __init__(self, a, b):
+        super(HalfPlane, self).__init__(a, b)
+
+    # Query if a point is in the acceptable portion of a half-plane
+    def contains(self, vec, toggle, is_open):
+        c = Line.eval_at(self, vec.x).y - vec.y
+        if toggle:
+            return c > 0 if is_open else c >= 0
+        else:
+            return c < 0 if is_open else c <= 0
 
 # A semi-algebraic model for a circle/disk
 class CircleSemiAlgebraicModel(object):
@@ -109,11 +144,11 @@ class CircleSemiAlgebraicModel(object):
 
     # Check if this model contains the given coordinate
     def contains(self, coord, is_open):
-        dist = (coord.x-self.position.x)**2 + (coord.y-self.position.y)**2
+        dist = vec2_mag(vec2_diff(coord, self.position))
         if is_open:
-            return dist < self.r**2
+            return dist < self.r
         else:
-            return dist <= self.r**2
+            return dist <= self.r
 
 # A representation of a single, orphaned terplebot
 class Terplebot(object):
@@ -161,16 +196,13 @@ class Terplebot(object):
 
     # Whether or not this robot can be considered at its objective position
     def is_at_objective(self):
-        dx = self.objective.x - self.own_ext_char.position.x
-        dy = self.objective.y - self.own_ext_char.position.y
-        return sqrt(dx**2 + dy**2) < 0.025
+        return vec2_mag(vec2_diff(self.objective, self.own_ext_char.position)) < 0.025
 
     # Use the maximum allowable velocity, orientation between the current and goal positions, and
     # time to pass to calculate the preferred velocity
     def calculate_preferred_velocity(self, dt):
-        displacement = vec2_diff(self.objective, self.own_ext_char.position)
-        v_pref = vec2_div(displacement, dt)
-        if sqrt(v_pref.x**2 + v_pref.y**2) > self.max_vel:
+        v_pref = vec2_div(vec2_diff(self.objective, self.own_ext_char.position), dt)
+        if vec2_mag(v_pref) > self.max_vel:
             angle = atan2(v_pref.y, v_pref.x)
             v_pref = Vector2(x=self.max_vel*cos(angle),y=self.max_vel*sin(angle))
         return v_pref
@@ -209,9 +241,9 @@ class VelocityObstacleModel(object):
 
         # Build three lines to build the half-plane model
         self.lines = (
-            get_line_from_points(ORIGIN, self.points[0]),
-            get_line_from_points(ORIGIN, self.points[1]),
-            get_line_from_points(self.points[0], self.points[1])
+            Line.from_points(ORIGIN, self.points[0], as_half_plane=True),
+            Line.from_points(ORIGIN, self.points[1], as_half_plane=True),
+            Line.from_points(self.points[0], self.points[1], as_half_plane=True)
         )
 
     # Check that a velocity vector is within the bounds of this model
@@ -221,28 +253,25 @@ class VelocityObstacleModel(object):
         qr_pt1 = quadrant(self.points[1])
 
         cond0 = sum(map(int, [
-            self.lines[0][0] > 0,
+            self.lines[0].a > 0,
             (qr_cnt == 2) or (qr_cnt == 3),
             ((qr_pt1 == 1) and (qr_pt0 == 2)) or ((qr_pt1 == 3) and (qr_pt0 == 0)) or ((qr_pt1 == 3) and (qr_pt0 == 1))
         ])) % 2 == 1
         cond1 = sum(map(int, [
-            self.lines[1][0] < 0,
+            self.lines[1].a < 0,
             (qr_cnt == 2) or (qr_cnt == 3),
             (qr_pt1 == 1) and (qr_pt0 == 3)
         ])) % 2 == 1
         cond2 = sum(map(int, [
-            self.lines[2][0] > 0,
+            self.lines[2].a > 0,
             (qr_cnt == 1) or (qr_cnt == 2)
         ])) % 2 == 1
 
-        in_legs = (
-            half_plane_contains(self.lines[0], v, cond0, False) and
-            half_plane_contains(self.lines[1], v, cond1, False)
-        )
+        in_legs = self.lines[0].contains(v, cond0, False) and self.lines[1].contains(v, cond1, False)
         if self.circle_trunc.contains(v, False):
             return in_legs
         else:
-            return in_legs and half_plane_contains(self.lines[2], v, cond2, False)
+            return in_legs and self.lines[2].contains(v, cond2, False)
 
     # Find the point on the boundary of the velocity obstacle that is closest to a point inside the boundary
     # Returns the the coordinate on the boundary as well as the distance
@@ -253,7 +282,7 @@ class VelocityObstacleModel(object):
         u_circle = None
         dist_circle = None
         qr = quadrant(self.circle_trunc.position)
-        if half_plane_contains(self.lines[2], v, not ((self.lines[2][0] > 0) ^ ((qr == 1) or (qr == 2))), False):
+        if self.lines[2].contains(v, not ((self.lines[2].a > 0) ^ ((qr == 1) or (qr == 2))), False):
             angle = atan2(v.y - self.circle_trunc.position.y, v.x - self.circle_trunc.position.x)
             point_circle = vec2_translate(
                 self.circle_trunc.position,
@@ -261,13 +290,13 @@ class VelocityObstacleModel(object):
                 self.circle_trunc.r*sin(angle)
             )
             u_circle = vec2_diff(point_circle, v)
-            dist_circle = sqrt(u_circle.x**2 + u_circle.y**2)
+            dist_circle = vec2_mag(u_circle)
 
         # Get the closest point to each leg of the cone
-        point_leg1, u_leg1 = point_on_line_closest_to(self.lines[0], v)
-        point_leg2, u_leg2 = point_on_line_closest_to(self.lines[1], v)
-        dist_leg1 = sqrt(u_leg1.x**2 + u_leg1.y**2)
-        dist_leg2 = sqrt(u_leg2.x**2 + u_leg2.y**2)
+        point_leg1, u_leg1 = self.lines[0].point_closest_to(v)
+        point_leg2, u_leg2 = self.lines[1].point_closest_to(v)
+        dist_leg1 = vec2_mag(u_leg1)
+        dist_leg2 = vec2_mag(u_leg2)
 
         # Now find the minimum distance and corresponding point
         min_dist = dist_leg1
@@ -304,12 +333,12 @@ class ORCAAModel(object):
         self.orca_tau_AXs = []
 
     # Append a half-plane equation due to 
-    def append_orca_tau_AX(self, line, toggle):
-        self.orca_tau_AXs.append((line, toggle))
+    def append_orca_tau_AX(self, half_plane, toggle):
+        self.orca_tau_AXs.append((half_plane, toggle))
 
     # Check that a velocity vector is within the bounds of this model
     def contains(self, v, i=None):
-        return self.max_disk.contains(v, False) and all(half_plane_contains(l, v, t, False) for l,t in self.orca_tau_AXs[:i])
+        return self.max_disk.contains(v, False) and all(hp.contains(v, t, False) for hp,t in self.orca_tau_AXs[:i])
 
     # Use linear programming to iterate through the half-plane constraints to find the velocity
     # closest to the given preferred one
@@ -319,9 +348,9 @@ class ORCAAModel(object):
         v_new = v_pref
         assert(self.max_disk_padded.contains(v_new, False))
         # Loop through constraints, updating the best option as v_new
-        for i,(line,toggle) in enumerate(self.orca_tau_AXs):
-            if not half_plane_contains(line, v_new, toggle, False):
-                v_original, _ = point_on_line_closest_to(line, v_new)
+        for i,(hp,toggle) in enumerate(self.orca_tau_AXs):
+            if not hp.contains(v_new, toggle, False):
+                v_original, _ = hp.point_closest_to(v_new)
                 if self.contains(v_original, i=i+1):
                     v_new = v_original
                 else:
@@ -330,8 +359,7 @@ class ORCAAModel(object):
                         v_temp = v_original
                         is_valid = True
                         while True:
-                            x = v_temp.x + fdx
-                            v_temp = Vector2(x=x,y=(line[0]*x)+line[1])
+                            v_temp = hp.eval_at(v_temp.x+fdx)
                             if not self.max_disk.contains(v_temp, False):
                                 is_valid = False
                                 break
@@ -366,8 +394,10 @@ def build_ORCA_A_tau_for(terplebot, tau):
                 u_to_boundary, _, _ = voAB.boundary_point_closest_to(dv_opt)
                 half_plane_point = vec2_sum(vA_opt, vec2_div(u_to_boundary, 2))
                 m = -999999 * np.sign(u_to_boundary.x) if u_to_boundary.y == 0.0 else -u_to_boundary.x / u_to_boundary.y
-                half_plane_equation = get_line_from_slope_and_point(m, half_plane_point)
-                orcaA.append_orca_tau_AX(half_plane_equation, False)
+                orcaA.append_orca_tau_AX(
+                    Line.from_slope_and_point(m, half_plane_point, as_half_plane=True),
+                    False
+                )
     return orcaA
 
 # Handle the start of a new program

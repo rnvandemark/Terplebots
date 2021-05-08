@@ -5,9 +5,6 @@ import cv2
 from sys import argv as sargv
 from terple_msgs.msg import Vector2, DecentralizedRobotReadings, RobotExternalCharacteristics
 
-import sys
-sys.path.append("/home/nick/Documents/School/UMD/ENPM661/Project5/Terplebots/src/terple_planning/nodes")
-
 import DecentralizedRobotPlanner
 
 # Number of pixels on both the y and x axes
@@ -49,78 +46,91 @@ def scale_vel(v):
 def inv_scale_vel(nx,ny):
     return inv_scale(nx, ny, MY_CV_VEL_SCALE)
 
+def scale_radius(r):
+    return int(r*MY_CV_POS_SCALE)
+
 def main(vmax, tau, rA, pA, vA, other_terples):
-    # Get the first robot in the list to be robot B
-    rB = other_terples[0][0]
-    pB = Vector2(x=other_terples[0][1],y=other_terples[0][2])
-    vB = Vector2(x=other_terples[0][3],y=other_terples[0][4])
+    # Constant colors
+    COLORA = (0,0,255)
+    COLORB = (255,0,0)
 
-    # Create the test velocity obstacle
-    voab = DecentralizedRobotPlanner.VelocityObstacleModel(rA, rB, pA, pB, tau)
-
-    # Do misc calculations
-    vo_diff = DecentralizedRobotPlanner.vec2_diff(vA, vB)
-    r_rA = int(rA*MY_CV_POS_SCALE)
-    r_circ = int(voab.circle_trunc.r*MY_CV_VEL_SCALE)
+    # Calculate once and done
+    rA_scaled = scale_radius(rA)
     vel_far_x = MY_CV_VEL_SPACE * 4
-
-    # Calculate points (interpolated, for the case of the legs) to test the calculated lines
-    right_x = voab.points[1].x
-    line_leg1, line_leg2, line_cross = voab.lines
-    line_pts = [scale_vel(Vector2(x=x,y=(l[0]*x)+l[1])) for x,l in zip(
-        [-vel_far_x, -vel_far_x, vel_far_x, vel_far_x, right_x],
-        [line_leg1, line_leg2, line_leg1, line_leg2, line_cross]
-    )]
 
     # Draw the position-space image
     img_pos = white_image_with_axes((MY_CV_SIZE,MY_CV_SIZE,3))
-    img_pos = cv2.circle(img_pos, scale_pos(pA), r_rA, (0,0,255), -1)
+    img_pos = cv2.circle(img_pos, scale_pos(pA), rA_scaled, COLORA, 2)
     for rb in other_terples:
-        img_pos = cv2.circle(img_pos, scale_pos(Vector2(x=rb[1],y=rb[2])), int(rb[0]*MY_CV_POS_SCALE), (255,0,0), -1)
+        img_pos = cv2.circle(img_pos, scale_pos(Vector2(x=rb[1],y=rb[2])), scale_radius(rb[0]), COLORB, 2)
 
-    # Draw the velocity-space image
-    img_voab = white_image_with_axes((MY_CV_SIZE,MY_CV_SIZE,3))
-    # Shade in the velocity obstacle
-    for j in range(MY_CV_SIZE):
-        for i in range(MY_CV_SIZE):
-            if voab.contains(inv_scale_vel(i,j)):
-                img_voab[j,i] = (192,192,192)
-    # Draw the robots' velocities
-    img_voab = cv2.circle(img_voab, scale_vel(vA), 10, (0,0,255), -1)
-    for rb in other_terples:
-        img_voab = cv2.circle(img_voab, scale_vel(Vector2(x=rb[3],y=rb[4])), int(rb[0]*MY_CV_POS_SCALE), (255,0,0), -1)
-    # Draw the circle that truncates the cone
-    img_voab = cv2.line(img_voab, line_pts[0], line_pts[2], (0,255,0), 2)
-    img_voab = cv2.line(img_voab, line_pts[1], line_pts[3], (0,255,0), 2)
-    img_voab = cv2.line(img_voab, scale_vel(voab.points[0]), line_pts[4], (0,255,0), 2)
-    img_voab = cv2.circle(img_voab, scale_vel(voab.circle_trunc.position), 5, (128,0,128), -1)
-    img_voab = cv2.circle(img_voab, scale_vel(voab.circle_trunc.position), r_circ, (128,0,128), 1)
-    img_voab = cv2.circle(img_voab, scale_vel(voab.points[0]), 5, (255,255,0), -1)
-    img_voab = cv2.circle(img_voab, scale_vel(voab.points[1]), 5, (0,165,255), -1)
-    # Draw a velocity vA-vB in velocity-space and the closest boundary point if it's in the velocity obstacle
-    vo_diff_color = None
-    closest_to_boundary = None
-    if voab.contains(vo_diff):
-        vo_diff_color = (0,0,192)
-        vec_u, closest_point, closest_dist = voab.boundary_point_closest_to(vo_diff)
-        img_voab = cv2.line(img_voab, scale_vel(vo_diff), scale_vel(closest_point), (193,140,255), 2)
-        img_voab = cv2.circle(img_voab, scale_vel(closest_point), 5, (193,140,255), -1)
-    else:
-        vo_diff_color = (0,128,0)
-    img_voab = cv2.circle(img_voab, scale_vel(vo_diff), 5, vo_diff_color, -1)
+    imgs_voab = []
+    for other_terple in other_terples:
+        # Get the first robot in the list to be robot B
+        rB = other_terple[0]
+        pB = Vector2(x=other_terple[1],y=other_terple[2])
+        vB = Vector2(x=other_terple[3],y=other_terple[4])
+
+        # Create the test velocity obstacle
+        voab = DecentralizedRobotPlanner.VelocityObstacleModel(rA, rB, pA, pB, tau)
+
+        # Do misc calculations once and done
+        vo_diff = DecentralizedRobotPlanner.vec2_diff(vA, vB)
+        r_circ = int(voab.circle_trunc.r*MY_CV_VEL_SCALE)
+
+        # Calculate points (interpolated, for the case of the legs) to test the calculated lines
+        right_x = voab.points[1].x
+        line_leg1, line_leg2, line_cross = voab.lines
+        line_pts = [scale_vel(l.eval_at(x)) for x,l in zip(
+            [-vel_far_x, -vel_far_x, vel_far_x, vel_far_x, right_x],
+            [line_leg1, line_leg2, line_leg1, line_leg2, line_cross]
+        )]
+
+        # Draw the velocity-space image
+        img_voab = white_image_with_axes((MY_CV_SIZE,MY_CV_SIZE,3))
+        # Shade in the velocity obstacle
+        for j in range(MY_CV_SIZE):
+            for i in range(MY_CV_SIZE):
+                if voab.contains(inv_scale_vel(i,j)):
+                    img_voab[j,i] = (192,192,192)
+        # Draw the robots' velocities
+        img_voab = cv2.circle(img_voab, scale_vel(vA), rA_scaled, COLORA, 2)
+        img_voab = cv2.circle(img_voab, scale_vel(vB), scale_radius(rB), COLORB, 2)
+        # Draw the circle that truncates the cone
+        img_voab = cv2.line(img_voab, line_pts[0], line_pts[2], (0,255,0), 2)
+        img_voab = cv2.line(img_voab, line_pts[1], line_pts[3], (0,255,0), 2)
+        img_voab = cv2.line(img_voab, scale_vel(voab.points[0]), line_pts[4], (0,255,0), 2)
+        img_voab = cv2.circle(img_voab, scale_vel(voab.circle_trunc.position), 5, (128,0,128), -1)
+        img_voab = cv2.circle(img_voab, scale_vel(voab.circle_trunc.position), r_circ, (128,0,128), 1)
+        img_voab = cv2.circle(img_voab, scale_vel(voab.points[0]), 5, (255,255,0), -1)
+        img_voab = cv2.circle(img_voab, scale_vel(voab.points[1]), 5, (0,165,255), -1)
+        # Draw a velocity vA-vB in velocity-space and the closest boundary point if it's in the velocity obstacle
+        vo_diff_color = None
+        closest_to_boundary = None
+        if voab.contains(vo_diff):
+            vo_diff_color = (0,0,192)
+            vec_u, closest_point, closest_dist = voab.boundary_point_closest_to(vo_diff)
+            img_voab = cv2.line(img_voab, scale_vel(vo_diff), scale_vel(closest_point), (193,140,255), 2)
+            img_voab = cv2.circle(img_voab, scale_vel(closest_point), 5, (193,140,255), -1)
+        else:
+            vo_diff_color = (0,128,0)
+        img_voab = cv2.circle(img_voab, scale_vel(vo_diff), 5, vo_diff_color, -1)
+
+        # Finished
+        imgs_voab.append(img_voab)
 
     # Create a Terplebot
     terpleA = DecentralizedRobotPlanner.Terplebot(1, rA, vmax)
     terpleA.own_ext_char.position = pA
     terpleA.own_ext_char.velocity = vA
-    terpleA.set_sensor_readings(DecentralizedRobotReadings(data=[
+    terpleA.sensor_readings = DecentralizedRobotReadings(data=[
         RobotExternalCharacteristics(
             robot_id=i+2,
             position=Vector2(x=terp[1],y=terp[2]),
             velocity=Vector2(x=terp[3],y=terp[4]),
             radius=terp[0]
         ) for i,terp in enumerate(other_terples)
-    ]))
+    ])
     terpleA.initialized = True
 
     # Build ORCA for robot A
@@ -136,8 +146,8 @@ def main(vmax, tau, rA, pA, vA, other_terples):
     for leq,toggle in orcaA.orca_tau_AXs:
         img_orca = cv2.line(
             img_orca,
-            scale_vel(Vector2(x=-vel_far_x,y=(leq[0]*-vel_far_x)+leq[1])),
-            scale_vel(Vector2(x=vel_far_x,y=(leq[0]*vel_far_x)+leq[1])),
+            scale_vel(leq.eval_at(-vel_far_x)),
+            scale_vel(leq.eval_at(vel_far_x)),
             np.random.randint(255, size=3),
             2
         )
@@ -162,8 +172,10 @@ def main(vmax, tau, rA, pA, vA, other_terples):
         )
 
     cv2.imshow("Position Space", img_pos)
-    cv2.imshow("Velocity Space", img_voab)
+    for i in range(len(imgs_voab)):
+        cv2.imshow("Velocity Space (B{0})".format(i), imgs_voab[i])
     cv2.imshow("ORCAA", img_orca)
+
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 

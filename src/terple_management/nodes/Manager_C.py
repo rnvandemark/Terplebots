@@ -4,14 +4,13 @@ import numpy as np
 from cv2 import circle, line
 import rospy
 from math import sqrt, cos, sin, pi as PI
-from random import sample, shuffle, seed
+from random import sample, shuffle, seed, randint
 from terple_msgs.msg import NeighborsPose2D, BacktrackNode, MoveCommand, Path, AllPaths
 # from geometry_msgs.msg import Pose2D, Twist, Pose, Point, Quaternion
 from geometry_msgs.msg import Pose2D
 from sys import stdout
 import matplotlib.pyplot as plt
 from copy import copy
-
 
 ROS_NODE_NAME = "centralized_manager"
 
@@ -182,7 +181,7 @@ class Maze(object):
     def __init__(self, obst):
         self.obst = obst  # creates the obstacle space. 0 for obstacle, 1 for open space [y, x, t]
         self.wheel_speeds = (
-            int(WHEEL_SPEED_MINOR * 0.75),
+            int(WHEEL_SPEED_MINOR * 0.65),
             WHEEL_SPEED_MINOR,
             WHEEL_SPEED_MAJOR,
             0
@@ -248,7 +247,7 @@ class Maze(object):
             tP = visiting_link.vertex_node.time
 
             # Check if this is the goal position
-            if self.dist(nP, goal) <= 2:
+            if self.dist(nP, goal) <= 1.4:   # normally dist=2, for m dist=1
                 final_node = visiting_link.vertex_node
                 continue
 
@@ -362,7 +361,6 @@ def make_plan(ii, ij, fi, fj, angle_to_center, obst):
                 time_elapsed=n.twist_elements_to_here[2]),
             time=n.time
         ))
-        # print n.time, n.parent.time
         n = n.parent
 
     #      success                   path
@@ -410,7 +408,7 @@ class Obstacles(object):
         if self.space_time.shape[2] == 1:
             return True
 
-        if t < 4:
+        if t < 2:
             return True
 
         try:  # time layer exists
@@ -458,7 +456,7 @@ class Obstacles(object):
             # draw the point on space_time
             if not self.time_layer_exists(t):  # time layer doesnt exist yet
                 self.join_layers(self.empty)  # create a new empty time layer
-                for j in range(len(self.points)-1):  # fill it with the last known locs of the other bots
+                for j in range(len(self.points) - 1):  # fill it with the last known locs of the other bots
                     (yj, xj, tj) = self.points[j][-1]  # last known loc of bot j
                     self.mark(yj, xj, t)
                 # time layer now exists and is populated with other bots locs
@@ -471,16 +469,20 @@ class Obstacles(object):
             self.points[-1].append((y, x, t))
             self.mark(y, x, t)
 
-    def show(self):
-        for t in range(0, len(self.points[-1]), 2):
-            plt.imshow(self.space_time[:, :, t])
+    def show(self, t=None):
+        if t is None:
+            for t in range(0, len(self.points[-1]), 2):
+                plt.imshow(self.space_time[:, :, t])
+                plt.show()
+        else:
+            plt.imshow(self.space_time[:, :, t], cmap='gray', vmin=0, vmax=1)
             plt.show()
 
 
 def main():
     rospy.sleep(1)
     # set spawn parameters
-    num_of_bots = 20  # could later be changed to be user input
+    num_of_bots = 5  # could later be changed to be user input
     bot_spawn_radius = 4
 
     # get starting locations
@@ -495,15 +497,48 @@ def main():
         # figure out the 0 - BOARD_O angle to get from start to goal
         a = i * rad_btwn_bots * 180 / PI
         a = int(a / BOARD_O)
-        if a < GRID_O/2:
-            a += GRID_O/2
+        if a < GRID_O / 2:
+            a += GRID_O / 2
         else:
-            a -= GRID_O/2
+            a -= GRID_O / 2
         starting_angles.append(a)
 
+    # M_cords = np.array([[4, 0],
+    #                      [9, 3], [15, 5], [20, 7], [26, 10], [32, 12], [32, 17], [32, 22], [32, 27], [32, 32],
+    #                      [28, 30], [24, 28], [20, 26], [12, 26], [6, 26], [-1, 26], [-7, 26], [-13, 26], [-20, 26],
+    #                      [-24, 28], [-28, 30], [-32, 32], [-32, 27], [-32, 22], [-32, 17], [-32, 12],
+    #                      [-26, 12], [-20, 12], [-14, 12], [-8, 12], [-2, 12], [-7, 10], [-12, 8], [-16, 6], [-20, 4],
+    #                      [-20, 0],
+    #                      [9, -3], [15, -5], [20, -7], [26, -10], [32, -12], [32, -17], [32, -22], [32, -27], [32, -32],
+    #                      [28, -30], [24, -28], [20, -26], [12, -26], [6, -26], [-1, -26], [-7, -26], [-13, -26], [-20, -26],
+    #                      [-24, -28], [-28, -30], [-32, -32], [-32, -27], [-32, -22], [-32, -17], [-32, -12],
+    #                      [-26, -12], [-20, -12], [-14, -12], [-8, -12], [-2, -12], [-7, -10], [-12, -8], [-16, -6], [-20, -4]
+    #                     ]).astype('float16')
+    #
+    # # M cords is defined for 80x80 grid with center 0. map to this grid
+    # # Assume square grid
+    # M_cords += 40
+    # M_cords = M_cords / 80 * BOARD_H
+    # M_cords = M_cords.tolist()
+    #
+    # # M OPERATION GOAL GENERATION
+    # seed_num = randint(0, 100)
+    # print "Seed =", seed_num
+    # seed(seed_num)
+    # while True:
+    #     goal_locs = sample(M_cords, k=70)
+    #     for i in range(num_of_bots):
+    #         if goal_locs[i] == M_cords[i]:  # bot wouldn't move
+    #             break
+    #     else:
+    #         break
+
+    # NORMAL OPERATION GOAL GENERATION
     # rearrange list elements to get goal locations around the circle
     # make sure all bots need to move - ie. goal!=start for all bots
-    seed(3)
+    seed_num = randint(0, 100)
+    print "Seed =", seed_num
+    seed(seed_num)
     while True:
         goal_locs = sample(starting_locs, k=num_of_bots)
         for i in range(num_of_bots):
@@ -559,7 +594,7 @@ def main():
             max_path_length = len(backtrack)
 
         # print obst.points[-1]
-        # obst.show()
+        # obst.show(t=5)
 
     print "\nFinished Planning. Publishing Paths..."
     all_path_pub.publish(bot_paths=all_paths_list, max_path_length=max_path_length)
@@ -583,13 +618,6 @@ if __name__ == "__main__":
     GRID_O = int(360 / BOARD_O)
     GRID_ROBOT_RADIUS = ROBOT_RADIUS * GRID_D
     GRID_CLEARANCE = CLEARANCE * GRID_D
-    TOTAL_GRID_CLEARANCE = int(round(2*GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
+    TOTAL_GRID_CLEARANCE = int(round(2 * GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
 
     main()
-
-# # draw the initial robot circles on grid t=0
-# obst_0 = np.copy(obst_init)
-# for p in starting_locs:
-#     obst_0 = circle(obst_0, (int(p[1] * GRID_D), int(GRID_H - p[0] * GRID_D)), TOTAL_GRID_CLEARANCE, 0, -1)
-#     obst_0 = np.reshape(obst_0, (GRID_H, GRID_W, 1)).astype('uint8')
-# obst = np.concatenate((obst, obst_0), axis=2).astype('uint8')

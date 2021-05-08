@@ -25,10 +25,6 @@ def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, SCALE=None, color=(
     # Must also pass SCALE with image. represents how much bigger the output viz video is than the grid
 
     # reformat to be in gazebo grid system for calculations
-
-    # xs0 = xn
-    # ys0 = yn
-
     xn /= float(GRID_D)
     yn /= float(GRID_D)
 
@@ -63,13 +59,32 @@ def curve(xn, yn, theta_deg, ul, ur, dt=0.1, tf=1, img=None, SCALE=None, color=(
     yn *= GRID_D
     dist_traveled *= GRID_D
 
-    # print (xs0, ys0), "->", (xn, yn)
-    # rospy.sleep(0.1)
-
     # return img only if one is given
     if img is not None:
         return img
     return xn, yn, theta_deg, dist_traveled, tf
+
+
+def interpolate(all_paths, path_i, step_i, n):
+    # get the current and next pose
+    try:
+        curr = all_paths[path_i].backtrack_path[step_i]
+    except:
+        curr = all_paths[path_i].backtrack_path[-1]
+    try:
+        next_node = all_paths[path_i].backtrack_path[step_i + 1]
+    except:
+        next_node = all_paths[path_i].backtrack_path[-1]
+
+    xc = int(round(curr.position.x)) * SCALE
+    yc = GRID_H * SCALE - int(round(curr.position.y)) * SCALE
+    xn = int(round(next_node.position.x)) * SCALE
+    yn = GRID_H * SCALE - int(round(next_node.position.y)) * SCALE
+
+    x = np.linspace(xc, xn, n).astype('int64')
+    y = np.linspace(yc, yn, n).astype('int64')
+
+    return x, y
 
 
 def handle_paths(msg):
@@ -93,11 +108,12 @@ def handle_paths(msg):
         pose = path_i.backtrack_path[0]
         xi = int(round(pose.position.x)) * SCALE
         yi = GRID_H * SCALE - int(round(pose.position.y)) * SCALE
-        circle(frame, (xi, yi), int(2 * GRID_ROBOT_RADIUS * SCALE), 0, thickness=-1)
+        circle(frame, (xi, yi), int(GRID_ROBOT_RADIUS * SCALE), 0, thickness=-1)
     video.write(frame)
 
     # Draw the path for each bot
     all_paths = msg.bot_paths
+    paths_only_frame = empty_frame.copy()
     for step_i in range(msg.max_path_length):
         # Add the time value to the corner
         frame = rectangle(frame, (0, 0), (100, 100), (255, 255, 255), thickness=-1)
@@ -118,12 +134,34 @@ def handle_paths(msg):
                 ur = movement.move_cmd.right_wheel_speed
                 tf = movement.move_cmd.time_elapsed
                 frame = curve(xi, yi, thetai, ul, ur, dt=0.1, tf=tf, img=frame, SCALE=SCALE, color=(r, g, b))
+                paths_only_frame = curve(xi, yi, thetai, ul, ur, dt=0.1, tf=tf, img=paths_only_frame, SCALE=SCALE, color=(r, g, b))
             except:
                 pass
-        for f in range(2):
+        for f in range(3):
             video.write(frame)
 
-    for f in range(60):
+    # Add the bot motion on top of the paths
+    for step_i in range(msg.max_path_length):
+        # Get interpolated the bot locations
+        interpolated_points = [None] * len(all_paths)
+        num_of_interps = WHEEL_SPEED_MAJOR + 2
+        for path_i in range(len(all_paths)):
+            x, y = interpolate(all_paths, path_i, step_i, num_of_interps)
+            interpolated_points[path_i] = copy((x, y))
+
+        # Add circles to frames
+        for i in range(num_of_interps-1):
+            # Which line below that's commented determines if paths are shown during movement
+            frame = copy(paths_only_frame)
+            # frame = copy(empty_frame)
+            for path_i in range(len(all_paths)):
+                x = interpolated_points[path_i][0][i]
+                y = interpolated_points[path_i][1][i]
+                frame = circle(frame, (x, y), int(GRID_ROBOT_RADIUS * SCALE), 0, thickness=-1)
+            for f in range(1):
+                video.write(frame)
+
+    for f in range(90):
         video.write(frame)
     video.release()
     print "Finished render"
@@ -164,53 +202,3 @@ if __name__ == "__main__":
     TOTAL_GRID_CLEARANCE = int(round(2 * GRID_ROBOT_RADIUS + GRID_CLEARANCE))  # point robot radius
 
     wait_for_paths()
-
-"""    
-
-    video_size = (GRID_W*SCALE, GRID_H*SCALE)
-    # Build video writer to render the frames at 120 FPS
-    video = VideoWriter(
-       "visualization.mp4",
-       VideoWriter_fourcc(*'mp4v'),
-       30.0,
-       video_size
-    )
-
-    # Build image to be white and draw the obstacles
-    temp = np.uint8(setup_graph())
-    temp *= 255
-    img = np.empty((GRID_H, GRID_W, 3), dtype=np.uint8)
-    img[:, :, 0] = temp
-    img[:, :, 1] = temp
-    img[:, :, 2] = temp
-    img = resize(img, video_size, interpolation=INTER_NEAREST)
-
-    # draw the explored nodes
-    for i, p2d in enumerate(msg.explored):
-        # draw each wheel speed action that comes off start node
-        for action in p2d.moves_to_neighbors:
-            ul = action.left_wheel_speed
-            ur = action.right_wheel_speed
-            img = draw_curve(img, p2d.position.x, p2d.position.y, p2d.position.theta, ul, ur,
-            SCALE, (0, 0, 255)) 
-            # draws one move line
-
-        # only write a fraction of the frames to keep video length down
-        if i % 1 == 0:
-            video.write(img)
-
-    # draw the backtracking
-    for i,curr in enumerate(msg.backtrack_path[:-1]):
-        if curr.has_move_cmd:
-            nxt = msg.backtrack_path[i+1]
-            img = draw_curve(img, nxt.position.x, nxt.position.y, nxt.position.theta,
-                             curr.move_cmd.left_wheel_speed, curr.move_cmd.right_wheel_speed,
-                             SCALE, (0, 255, 0))  # draws one move line
-            # only write a fraction of the frames to keep video length down
-            if i % 1 == 0:
-                video.write(img)
-
-    video.release()
-    print("Finished render.")
-    
-"""

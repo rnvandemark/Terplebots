@@ -35,12 +35,17 @@ class ProgramOrchestrator(object):
 
     # Check if all robots have finished their motion
     def gen_combined_paths(self):
-        paths = [v[2] for v in self.updates_by_id.values()]
-        return DecentralizedCombinedPaths(robot_ids=list(self.updates_by_id.keys()), paths=paths)
+        robot_ids = []
+        paths = []
+        for k,v in self.updates_by_id.items():
+            robot_ids.append(k)
+            paths.append(v[2])
+        return DecentralizedCombinedPaths(robot_ids=robot_ids, paths=paths)
 
 # Set the update flag in the given orchestrator
 def update_callback(msg, orch, step_pub, combined_paths_pub):
     orch.set_for_id(msg.robot_id, msg.finished, msg.path)
+    rospy.loginfo("Step #{0} ({1},{2})".format(msg.robot_id, msg.finished, len(msg.path.data)))
     if orch.all_ids_finished():
         combined_paths_pub.publish(orch.gen_combined_paths())
         rospy.loginfo("All robots have finished.")
@@ -48,6 +53,7 @@ def update_callback(msg, orch, step_pub, combined_paths_pub):
         rospy.signal_shutdown("Received path and published combined paths, ready for clean shutdown.")
     elif orch.all_ids_updated():
         orch.clear_updates()
+        rospy.loginfo("")
         step_pub.publish(Empty())
 
 def main():

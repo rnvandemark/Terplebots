@@ -1,0 +1,33 @@
+<launch>
+  <arg name="do_viz" default="0" />
+
+  <arg name="terplebot_count" default="10" />
+  <arg name="tau_seconds_theoretical" default="2" />
+  <arg name="tau_seconds_actual" default="$(eval 0.9*arg('tau_seconds_theoretical'))" />
+  <arg name="robot_radius" default="0.1" />
+  <arg name="max_vel" default="0.5" />
+
+  <include file="$(find terple_sim)/launch/spawn_terplebot.launch" if="$(eval arg('terplebot_count') > 0)">
+    <arg name="robot_id" value="$(arg terplebot_count)" />
+    <arg name="node_name_base" value="terple_decentralized" />
+  </include>
+
+  <rosparam subst_value="True">
+    /terple/decentralized/robot_radius: $(arg robot_radius)
+    /terple/decentralized/max_vel: $(arg max_vel)
+    /terple/decentralized/tau_seconds_theoretical: $(arg tau_seconds_theoretical)
+    /terple/decentralized/tau_seconds_actual: $(arg tau_seconds_actual)
+  </rosparam>
+
+  <node
+    name="terple_decentralized_sensing_simulator"
+    pkg="terple_management"
+    type="DecentralizedSensingSimulator.py"
+    output="screen" />
+  <node
+    name="terple_decentralized_visualizer"
+    pkg="terple_sim"
+    type="DecentralizedVisualizer.py"
+    output="screen"
+    if="$(arg do_viz)" />
+</launch>
